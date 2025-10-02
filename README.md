@@ -136,7 +136,7 @@ Then the AI class will handle them like little smart minions slaves
 
 - Voice I/O
 
-- Vision (expected in the very next version)
+- Vision (Image added. Video is under consideration. Please stand by.)
 
 - Agentic mode (because why the hell not)
 
@@ -169,7 +169,7 @@ these repeats for the rest of eternity, until the output layer is reached
 
 
 
-the model takes the formed "thing" and predicts what should come next using probablity, why? its fun. how? temperature, unlike my friends's crush, its the parameter which controls the empathy of the model, this gives the option for the backward words to have a chance and appends it until the brakes aren't pressed  
+the model takes the formed "thing" and predicts what should come next using probablity, why? its fun. how? temperature, unlike my friends's crush, its the parameter which controls the empathy of the model, this gives the option for the backward words to have a chance and appends it until the brakes aren't pressed  
 
 ----- QUESTIONS I MANAGED TO ANSWER -----
 
