@@ -1,16 +1,19 @@
 from datetime import datetime
-import asyncio
+import os
 import aiofiles
 
-async def log(message: str, level, log_file: str = "logs/log.log", append = True):
+async def log(message: str, level, append = True):
+    log_dir = os.path.join( "main", "logs")
+    os.makedirs(log_dir, exist_ok=True)
     timestamp = datetime.now().strftime("%H:%M:%S - %d / %m  / %Y ")
     emoji = {
         "info": "ℹ️",
-        "warning": "⚠️",
+        "warn": "⚠️",
         "error": "🟥",
         "success": "✅"
     }.get(level, "")
     text = f"{emoji} [{level}] {message} - [{timestamp}]\n"
-    async with aiofiles.open(log_file, "a" if append else "w") as f:
+    log_file = os.path.join(log_dir, 'log.log')
+    async with aiofiles.open(log_file, "w" if not  append else "a") as f:
         print(text)
         await f.write(text)
