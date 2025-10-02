@@ -60,6 +60,7 @@ PULSE IS:
 - [Zephyr](https://ollama.com/library/zephyr)
 
 - [DeepSeek-R1](https://ollama.com/library/deepseek-r1)
+- [MoonDream](https://ollama.com/library/moondream)
 
 
 3. Install and setup [Python](https://www.python.org/downloads/)
@@ -122,6 +123,16 @@ Use the new `setup.py` for faster setup, it's still under development so expect 
         "has_vision": false,
         "port": 11435,
         "system_prompt": ""
+    },
+    {
+        "role": "vision",
+        "name": "MoonDream",
+        "ollama_name": "moondream",
+        "has_tools": false,
+        "has_CoT": false,
+        "has_vision": true,
+        "port": 11543,
+        "system_prompt" : ""
     },
     ...
 ]
