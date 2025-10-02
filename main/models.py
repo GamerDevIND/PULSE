@@ -5,6 +5,7 @@ import aiohttp
 import subprocess
 from utils import log
 from configs import ERROR_TOKEN
+import base64
 
 class Model:
     def __init__(self, role: str, name: str, ollama_name: str, has_tools: bool, has_CoT: bool, has_vision:bool, port: int, system_prompt: str):
@@ -13,6 +14,7 @@ class Model:
         self.ollama_name = ollama_name
         self.has_tools = has_tools
         self.has_CoT = has_CoT
+        self.has_vision = has_vision
         self.port = port
         self.system = system_prompt
         self.host = f"http://localhost:{self.port}"
@@ -40,7 +42,20 @@ class Model:
             await asyncio.sleep(1)
         raise TimeoutError(f"🟥 Ollama server for {self.name} did not start in time.")
 
-    async def warm_up(self):
+    async def _encode_image(self,image_path):
+        try:
+            with open(image_path, "rb") as image_file:
+                image_data = image_file.read()
+
+            base64_image = base64.b64encode(image_data).decode("utf-8")
+            return base64_image, None
+        except Exception as e:
+            return ERROR_TOKEN, e
+
+    async def warm_up(self, use_mmap= False, warmup_image_path="main/test.jpg", use_custom_keep_alive_timeout = False, custom_keep_alive_timeout: str = "5m"):
+        self.use_custom_keep_alive_timeout = use_custom_keep_alive_timeout
+        self.custom_keep_alive_timeout = custom_keep_alive_timeout
+        self.use_mmap = use_mmap
         if self.warmed_up:
             if self.process and (self.process.poll() is None):
                 return
@@ -58,7 +73,7 @@ class Model:
         os.makedirs(log_dir, exist_ok=True)
         log_file_path = os.path.join(log_dir, f"{self.ollama_name}.log")
         
-        await log(f"🟨 [INFO] {self.name} ({self.ollama_name}) warming up...", "info")
+        await log(f"{self.name} ({self.ollama_name}) warming up...", "info")
         with open(log_file_path, "w") as f:
             self.process = subprocess.Popen(
                 self.start_command,
@@ -80,11 +95,27 @@ class Model:
             "model": self.ollama_name,
             "messages": [{"role": "user", "content": "hi"}],
             "stream": False,
-            "options": {
-                "use_mmap": True
-            }
         }
-        await log(f'Sending request on {url}:\n{data}', 'info')
+
+        options = {}
+        if self.use_mmap:
+            options["use_mmap"] = True
+        if self.use_custom_keep_alive_timeout:
+            options["keep_alive"] = self.custom_keep_alive_timeout
+
+        if self.has_vision:
+            encoded_image, e = await self._encode_image(warmup_image_path)
+            if encoded_image == ERROR_TOKEN:
+                await log(f"Error encoding image!: {e}", 'error')
+                raise Exception(f"Error encoding image!: {e}")
+            else:
+                data['messages'][-1]['images'] = [encoded_image]
+
+        data["options"] = options
+        data_print = data
+        if data["messages"][-1].get("images", False):
+            data_print["messages"][-1]['images'] = "[Image Encoded String...]"
+        await log(f'Sending request on {url}:\n{data_print}', 'info')
         try:
             async with self.session.post(url, headers=headers, data=json.dumps(data)) as response:
                 response.raise_for_status()
@@ -122,13 +153,32 @@ class Model:
         self.warmed_up = True
         await log(f"🟩 [INFO] {self.name} ({self.ollama_name}) warmed up!", "success")
 
-    async def generate(self, query: str, context: list[dict], stream: bool):
+    async def generate(self, query: str, context: list[dict], stream: bool, image_path=None):
         await log(f"Generating response from {self.name}...", "info")
         endpoint = self._get_endpoint()
         url = f"{self.host}{endpoint}"
         messages = [{'role': "system", 'content': self.system}] + context + [{"role": "user", "content": query}]
         headers = {"Content-Type": "application/json"}
-        data = {"model": self.ollama_name, "messages": messages, "stream": stream, "options": {"use_mmap": True}}
+        data = {"model": self.ollama_name, "messages": messages, "stream": stream}
+        
+        options = {}
+        if self.use_mmap:
+            options["use_mmap"] = True
+        if self.use_custom_keep_alive_timeout:
+            options["keep_alive"] = self.custom_keep_alive_timeout
+
+        if self.has_vision:
+            if image_path is not None:
+                image, e = await self._encode_image(image_path)
+                if image == ERROR_TOKEN:
+                    await log(f"Error encoding image!: {repr(e)}", 'error')
+                    yield f"Error encoding image!: {repr(e)}"
+                    return
+                else:
+                    data['messages'][-1]['images'] = [image]
+        
+        if options:
+            data['options'] = options
         if self.session:
             try:
                 async with self.session.post(url, headers=headers, data=json.dumps(data)) as response:
