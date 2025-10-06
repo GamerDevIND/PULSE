@@ -1,5 +1,8 @@
 STREAM_DISABLED= ["discod", "cli-no-stream"]
 
+IMAGE_EXTs = ['.png', '.jpg', '.jpeg']
+VIDEO_EXTs =  ['.mp4', '.mov', '.avi']
+
 ERROR_TOKEN = "__ERROR__"
 
 DEFAULT_PROMPT: str = r"""
@@ -28,3 +31,4 @@ CHAOS_PROMPT = r"""
 VISION_PROMPT = r''' 
 [ Your prompt for the vision model ]
 '''
+
