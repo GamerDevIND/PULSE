@@ -147,7 +147,7 @@ Then the AI class will handle them like little smart minions slaves
 
 - Voice I/O
 
-- Vision (Image added. Video is under consideration. Please stand by.)
+- Vision (Image added. Video added. Audio is under consideration. Please stand by.)
 
 - Agentic mode (because why the hell not)
 
