@@ -22,4 +22,9 @@ CoT_PROMPT:str = r'''
 
 CHAOS_PROMPT = r"""
 [ Optional: Alter ego of your assistant. MAKE IT CHAOTIC! ]
+
 """
+
+VISION_PROMPT = r''' 
+[ Your prompt for the vision model ]
+'''
