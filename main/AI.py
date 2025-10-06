@@ -1,5 +1,6 @@
 import asyncio
 import aiofiles
+import aiohttp
 import json
 from utils import log
 from models import Model
@@ -10,7 +11,8 @@ from configs import (
     DEFAULT_PROMPT, 
     CHAOS_PROMPT, 
     STREAM_DISABLED,
-    ERROR_TOKEN
+    ERROR_TOKEN,
+    VISION_PROMPT
 )
 
 class AI:
@@ -22,6 +24,7 @@ class AI:
             "chat": CHAT_PROMPT,
             "router": ROUTER_PROMPT,
             "cot": CoT_PROMPT,
+            'vision':VISION_PROMPT
         }
         self.default_model = 'chat'
         self.load_models()
@@ -62,10 +65,19 @@ class AI:
         except IOError as e:
             await log(f"🟥 Error saving context: {e}", "error")
 
+    async def _ping_model_tag(self, url):
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.get(f"{url}/api/tags") as res:
+                    if res.status == 200:
+                        return True
+        except aiohttp.ClientError:
+                return False
+
     async def check_models(self, interval=10):
         while True:
-            for role, model in self.models.items():
-                if model.process and (model.process.poll() is not None):
+            for _, model in self.models.items():
+                if (model.process and (model.process.returncode is not None)) or not await self._ping_model_tag(model.host):
                     await log(f"⚠️ {model.name} crashed. Restarting...", "warn")
                     await model.warm_up()
             await asyncio.sleep(interval)
