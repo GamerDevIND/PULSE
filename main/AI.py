@@ -171,7 +171,7 @@ class AI:
         print("Done.")
 
 async def main():
-    ai = AI("main/Models_config_test.json")
+    ai = AI()
     await ai.init("cli")
     while True:
         req = input(">>> ")
@@ -196,7 +196,7 @@ async def main():
             image_path = None
 
         try:
-            async for part in ai.generate(req,manual_routing=True, image_path = image_path):
+            async for part in ai.generate(req,image_path = image_path):
                 print(part, end="", flush=True)
             print()
             await log("Generation Completed", 'success')
