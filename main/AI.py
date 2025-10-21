@@ -47,9 +47,9 @@ class AI:
     async def init(self, platform: str):
         self.context = await self.load_context()
         self.platform = platform
-
+        
         await log("Warming up all models...", "info", append=False)
-
+        
         for model in self.models.values():
             await model.warm_up()
 
@@ -106,7 +106,7 @@ class AI:
                     await log("Router API call failed. Using default.", "error")
                     return query, self.default_model
                 router_resp_parts.append(part)
-
+                
             router_resp_raw = "".join(router_resp_parts).strip()
             selected_role = None
 
@@ -116,7 +116,7 @@ class AI:
                     selected_role = router_resp.get("model", router_resp.get("role", "")).strip().lower()
             except json.JSONDecodeError:
                 selected_role = router_resp_raw.lower()
-
+            
             if selected_role in self.models:
                 await log(f"Router selected model '{selected_role}'.", "info")
                 return query, selected_role
@@ -141,7 +141,7 @@ class AI:
             else:
                 await log(f"No or incorrect prefix, using default '{self.default_model}'", "info")
                 return query, self.default_model
-
+                
     async def generate(self, query, stream: None | bool = None, manual_routing = False, seperate_thinking = False, image_path= None):
         query, model_name = await self.route_query(query, manual_routing)
 
@@ -184,7 +184,7 @@ class AI:
             task.cancel()
         shutdown_tasks = [model.shutdown() for model in self.models.values()]
         await asyncio.gather(*shutdown_tasks, return_exceptions=True)
-
+        
         await self.save_context()
         print("Done.")
 
@@ -212,7 +212,7 @@ async def main():
             req = "/bye"
         except (KeyboardInterrupt, signal.default_int_handler):
             req = "/bye"
-
+        
         if shutdown_event.is_set():
             break
 
