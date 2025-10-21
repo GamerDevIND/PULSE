@@ -2,6 +2,7 @@ import asyncio
 import aiofiles
 import aiohttp
 import json
+import signal
 from utils import log
 from models import Model
 from configs import ( 
@@ -28,6 +29,7 @@ class AI:
         }
         self.default_model = 'chat'
         self.load_models()
+        self.running_tasks = set()
 
     def load_models(self):
         try:
@@ -45,10 +47,15 @@ class AI:
     async def init(self, platform: str):
         self.context = await self.load_context()
         self.platform = platform
+
         await log("Warming up all models...", "info", append=False)
+
         for model in self.models.values():
             await model.warm_up()
-            await asyncio.sleep(0.02) 
+
+        check_task = asyncio.create_task(self.check_models())
+        self.running_tasks.add(check_task)
+        check_task.add_done_callback(self.running_tasks.discard)
 
     async def load_context(self):
         try:
@@ -67,19 +74,22 @@ class AI:
 
     async def _ping_model_tag(self, url):
         try:
-            async with aiohttp.ClientSession() as session:
+            async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=2)) as session:
                 async with session.get(f"{url}/api/tags") as res:
-                    if res.status == 200:
-                        return True
+                    return res.status == 200
         except aiohttp.ClientError:
                 return False
 
     async def check_models(self, interval=10):
         while True:
             for _, model in self.models.items():
-                if (model.process and (model.process.returncode is not None)) or not await self._ping_model_tag(model.host):
-                    await log(f"⚠️ {model.name} crashed. Restarting...", "warn")
-                    await model.warm_up()
+                is_terminated = model.process and model.process.returncode is not None
+
+                is_unresponsive = not await self._ping_model_tag(model.host)
+
+                if is_terminated or is_unresponsive:
+                    await log(f"⚠️ {model.name} crashed/unresponsive (Terminated: {is_terminated}, Unresponsive: {is_unresponsive}). Restarting...", "warn")
+                    await model.warm_up() 
             await asyncio.sleep(interval)
 
 
@@ -96,7 +106,7 @@ class AI:
                     await log("Router API call failed. Using default.", "error")
                     return query, self.default_model
                 router_resp_parts.append(part)
-                
+
             router_resp_raw = "".join(router_resp_parts).strip()
             selected_role = None
 
@@ -106,7 +116,7 @@ class AI:
                     selected_role = router_resp.get("model", router_resp.get("role", "")).strip().lower()
             except json.JSONDecodeError:
                 selected_role = router_resp_raw.lower()
-            
+
             if selected_role in self.models:
                 await log(f"Router selected model '{selected_role}'.", "info")
                 return query, selected_role
@@ -125,9 +135,13 @@ class AI:
                 query = query.removeprefix("!chaos").strip()
                 self.models['chat'].system = CHAOS_PROMPT
                 return query, "chat"
+            elif query.startswith("!vision"):
+                query = query.removeprefix("!vision").strip()
+                return query, "vision"
             else:
                 await log(f"No or incorrect prefix, using default '{self.default_model}'", "info")
                 return query, self.default_model
+
     async def generate(self, query, stream: None | bool = None, manual_routing = False, seperate_thinking = False, image_path= None):
         query, model_name = await self.route_query(query, manual_routing)
 
@@ -137,6 +151,7 @@ class AI:
             stream = self.platform not in STREAM_DISABLED
 
         model = self.models[model_name]
+
         async for res in model.generate(query, self.context['conversations'], stream, image_path=image_path):
             if res == ERROR_TOKEN:
                 save = False
@@ -165,20 +180,47 @@ class AI:
 
     async def shut_down(self):
         await log("Shutting Down all services...", "info")
+        for task in self.running_tasks:
+            task.cancel()
         shutdown_tasks = [model.shutdown() for model in self.models.values()]
-        await asyncio.gather(*shutdown_tasks)
+        await asyncio.gather(*shutdown_tasks, return_exceptions=True)
+
         await self.save_context()
         print("Done.")
 
 async def main():
-    ai = AI()
+    ai = AI("main/Models_config_test.json")
     await ai.init("cli")
-    while True:
-        req = input(">>> ")
-        if req == "/bye":
-            await ai.shut_down()
+
+    loop = asyncio.get_running_loop()
+    shutdown_event = asyncio.Event()
+
+    def signal_handler():
+        print("\nReceived shutdown signal. Initiating graceful shutdown...")
+        asyncio.create_task(ai.shut_down())
+        shutdown_event.set()
+
+    loop.add_signal_handler(signal.SIGINT, signal_handler)
+    loop.add_signal_handler(signal.SIGTERM, signal_handler)
+    if hasattr(signal, "SIGHUP"):
+        loop.add_signal_handler(signal.SIGHUP, signal_handler)
+
+    while not shutdown_event.is_set():
+        try:
+            req = await loop.run_in_executor(None, input, ">>> ")
+        except EOFError:
+            req = "/bye"
+        except (KeyboardInterrupt, signal.default_int_handler):
+            req = "/bye"
+
+        if shutdown_event.is_set():
             break
 
+        if req.strip() == "/bye":
+            await ai.shut_down()
+            break ; exit()
+
+        image_path = None
         if req.startswith("!vision"):
             req = req.removeprefix("!vision").strip()
             parts = req.split("|", 1)
@@ -189,17 +231,17 @@ async def main():
             else:
                 image_path = None
                 req = parts[0].strip()
-                await log("No image path provided. Continuing with text only.", 'warn')
+                await log("No image path provided. Continuing with text only.", "warn")
 
         if not any(m.has_vision for m in ai.models.values()):
-            await log("No vision models available. Skipping image input.", 'warn')
+            await log("No vision models available. Skipping image input.", "warn")
             image_path = None
 
         try:
-            async for part in ai.generate(req,image_path = image_path):
+            async for part in ai.generate(req, manual_routing=True, image_path=image_path):
                 print(part, end="", flush=True)
             print()
-            await log("Generation Completed", 'success')
+            await log("Generation Completed", "success")
         except Exception as e:
             await log(f"Main loop error: {e}", "error")
             break
