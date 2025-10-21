@@ -60,7 +60,7 @@ class Model:
             video_stream = next((s for s in container.streams if s.type == 'video'), None)
             if not video_stream:
                 raise ValueError("No video stream found in the file.")
-
+                
             for i, frame in enumerate(container.decode(video_stream)): # type: ignore
                 if i % mod_ == 0:
                     img = frame.to_image() # type: ignore
@@ -107,13 +107,13 @@ class Model:
         log_dir = os.path.join( "main", "logs")
         os.makedirs(log_dir, exist_ok=True)
         log_file_path = os.path.join(log_dir, f"{self.ollama_name}.log")
-
+            
         await log(f"{self.name} ({self.ollama_name}) warming up...", "info")
         async with aiofiles.open(log_file_path, "w") as f:
             self.process = subprocess.Popen( self.start_command, env=self.ollama_env, stderr=subprocess.STDOUT, stdout=f.fileno()
 )
         await self.wait_until_ready(self.host)
-
+            
         if not self.session:
             self.session = aiohttp.ClientSession()
 
@@ -160,7 +160,7 @@ class Model:
 
         data["options"] = options
         await log(f'Sending non-streaming warm-up request on {url}', 'info')
-
+        
         try:
             async with self.session.post(url, headers=headers, data=json.dumps(data)) as response:
                 response.raise_for_status()
@@ -187,7 +187,7 @@ class Model:
                                 json.loads(line.strip()) 
                             except json.JSONDecodeError:
                                 continue
-
+                        
         except (aiohttp.ClientError, json.JSONDecodeError) as e:
             await log(f"🟥 Streaming test failed for {self.name}: {e}", "error")
             return
@@ -203,12 +203,12 @@ class Model:
         messages = []
         if self.system:
             messages.append({'role': "system", 'content': self.system})
-
+            
         messages += context + [{"role": "user", "content": query}]
-
+        
         headers = {"Content-Type": "application/json"}
         data = {"model": self.ollama_name, "messages": messages, "stream": stream}
-
+        
         options = {}
         if self.use_mmap:
             options["use_mmap"] = True
@@ -292,5 +292,5 @@ class Model:
             except Exception as e:
                 await log(f"Error terminating process for {self.name}: {e}", "error")
             self.process = None
-
+                
         await log(f"{self.name} process terminated.", "success")
