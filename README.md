@@ -28,6 +28,9 @@ PULSE IS:
 - A unhinged system of LLMs which claims to be your friend, assistant and roaster
 
 
+---
+
+Oh, by the way I added tool calling (function calling).
 
 ---
 
