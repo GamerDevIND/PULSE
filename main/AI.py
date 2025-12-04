@@ -76,7 +76,7 @@ class AI:
             async with aiofiles.open(self.context_path, "w") as file:
                 await file.write(json.dumps(self.context, indent=2))
         except IOError as e:
-            await log(f"🟥 Error saving context: {e}", "error")
+            await log(f"Error saving context: {e}", "error")
 
     async def _test_model(self, url, ollama_name ):
         try:
