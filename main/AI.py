@@ -146,8 +146,8 @@ class AI:
                                     await _model.shutdown()
                         
         except (FileNotFoundError, json.JSONDecodeError) as e:
-            print(f"🟥 Error loading models: {e}")
-            self.models = old_models
+            await log(f"Error loading models: {e}", 'error')
+            self.models = old_modelss
 
     async def route_query(self, query: str, manual: bool):
         if not manual:
