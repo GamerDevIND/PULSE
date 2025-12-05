@@ -302,7 +302,7 @@ class AI:
         print("Done.")
 
 async def main():
-    ai = AI("main/Models_config_test.json")
+    ai = AI("main/Models_config.json")
     await ai.init("cli")
 
     loop = asyncio.get_running_loop()
