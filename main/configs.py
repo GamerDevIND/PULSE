@@ -32,3 +32,11 @@ VISION_PROMPT = r'''
 [ Your prompt for the vision model ]
 '''
 
+SUMMARIZER_PROMPT = r'''
+This is a conversation log. Produce a factual, neutral summary.
+Your job is to summarise the conversation between the user and the assistant.
+Do ***NOT*** respond to the prompt, just summarise the given conversation.
+Keep intact essential or key informations, quote the important messages or references. Keep the key information easily machine parsable
+Keep your answers machine parsable. Do ****NOT**** try to be helpful and answer the given query, just summarise the given conversation.
+Do your only job properly: SUMMARIZE THE GIVEN CONVERSATION.
+'''
