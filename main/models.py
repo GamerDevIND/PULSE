@@ -25,7 +25,6 @@ class Model:
         self.ollama_env = os.environ.copy()
         self.ollama_env["OLLAMA_HOST"] = self.host
         self.warmed_up = False
-        self._restarting = False
         self.session: aiohttp.ClientSession | None = None
         self.process = None
         self.use_custom_keep_alive_timeout = False
@@ -258,8 +257,7 @@ class Model:
 
         self.warmed_up = True
         await log(f"{self.name} ({self.ollama_name}) warmed up!", "success")
-        self._restarting = False
-
+        
     async def add_tools(self, *tool_dict):
         self.tools.extend(tool_dict)
 
