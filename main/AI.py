@@ -13,7 +13,8 @@ from configs import (
     CHAOS_PROMPT, 
     STREAM_DISABLED,
     ERROR_TOKEN,
-    VISION_PROMPT
+    VISION_PROMPT,
+    SUMMARIZER_PROMPT
 )
 
 class AI:
@@ -25,7 +26,8 @@ class AI:
             "chat": CHAT_PROMPT,
             "router": ROUTER_PROMPT,
             "cot": CoT_PROMPT,
-            'vision': VISION_PROMPT
+            'vision': VISION_PROMPT,
+            'summarizer': SUMMARIZER_PROMPT,
         }
         self.default_model = 'chat'
         self.load_models()
@@ -47,14 +49,15 @@ class AI:
     async def init(self, platform: str):
         self.context = await self.load_context()
         self.platform = platform
-        
+
         await log("Warming up all models...", "info", append=False)
-        
+
         available_tools = []
-        
+
         for model in self.models.values():
             if model.has_tools:
-                await model.add_tools(*available_tools)
+                tools = await load_tools(*available_tools)
+                await model.add_tools(*tools)
                 await log(f"Tools added to {model.name}", "info")
 
             await model.warm_up()
@@ -106,48 +109,86 @@ class AI:
 
     async def _ping_model_tag(self, url):
         try:
-            async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=2)) as session:
+            async with aiohttp.ClientSession() as session:
                 async with session.get(f"{url}/api/tags") as res:
                     return res.status == 200
         except aiohttp.ClientError:
                 return False
 
     async def check_models(self, interval=10):
+        cooldowns = {name: 0 for name in self.models}
+
         while True:
-            for _, model in self.models.items():
-                is_terminated = model.process and model.process.returncode is not None
-
-                is_unresponsive = not await self._ping_model_tag(model.host)
-                is_not_responding = False
-
-                if is_unresponsive:
-                    is_not_responding = not await self._test_model(model.host, model.ollama_name)
-
-                if is_terminated or is_unresponsive or is_not_responding:
-                    await log(f"{model.name} crashed/unresponsive (Terminated: {is_terminated}, Unresponsive: {is_unresponsive} not responding: {is_not_responding}). Restarting...", "warn")
-                    await model.warm_up() 
+            for name, model in self.models.items():
+                try:
+                    if cooldowns[name] > 0:
+                        cooldowns[name] -= 1
+                        continue
+                    is_terminated = model.process and model.process.returncode is not None
+                    is_alive = await self._ping_model_tag(model.host)
+                    is_responding = False
+                    if is_alive:
+                        is_responding = await self._test_model(model.host, model.ollama_name)
+                    if is_terminated or not is_responding or not is_alive:
+                        cooldowns[name] = 4
+                        await log( f"{model.name} crashed/unresponsive " f"(Terminated: {is_terminated}, \
+                                  Unresponsive: {not is_alive}, responding: {is_responding}). " f"Restarting ONLY this model.", "warn" )
+                        await model.warm_up()
+                except Exception as e:
+                    await log(f"Error while checking models: {e}", 'error')
             await asyncio.sleep(interval)
 
-    async def hot_swap_models(self, config_file_path):
-        old_models = self.models.copy()
-        try:
-            with open(config_file_path, 'r', encoding="utf-8") as f:
-                models_data = json.load(f)
-                for model_data in models_data:
-                    role = model_data.get('role')
-                    if role:
-                        model_data["system_prompt"] = self.system_prompts.get(role, DEFAULT_PROMPT)
-                        self.models[role] = Model(**model_data)
-                        for name, model in self.models.items():
-                            if name not in old_models.keys():
-                                await model.warm_up()
-                                _model = old_models.get(name)
-                                if _model:
-                                    await _model.shutdown()
+    async def summarise_context(self, context = None, max_nums = 20, model_role = 'summarizer' , pair = False, save_context = True):
+        if context is None:
+            context = self.context
+
+        model = self.models.get(model_role)
+        if model:
+            threshold = ((len(context) // 2) if pair else len(context))
+            if threshold >= max_nums:
+                given_context = context[:max_nums]
+                text = '\n'
+                for t in given_context:
+                    role = t['role']
+                    content = t['content']
+
+                    if role != 'tool':
+                        text += f"{role} : {content}\n"
+                
+                s = model.system
+
+                model.system = self.system_prompts.get('summarizer', 'This is a conversation log. Produce a factual, neutral summary.\n\
+                                                       Do your only job properly: SUMMARIZE THE GIVEN CONVERSATION.  \
+                                                       Do ****NOT**** try to be helpful and answer the given query, just summarise the given conversation.')
+                
+                summary = context[:max_nums]
+                try:
+                    async for (_, summary, _ )in model.generate(text, [], stream=False):
+                        if summary and isinstance(summary, str):
+                            summary = summary
                         
-        except (FileNotFoundError, json.JSONDecodeError) as e:
-            await log(f"Error loading models: {e}", 'error')
-            self.models = old_modelss
+                            summary = {
+                                'role': 'tool',
+                                'tool_name': 'summarizer',
+                                'content': summary
+                            }
+                        else:
+                            summary = self.context[:max_nums]
+                except Exception as e:
+                    await log(f"Error during summarization: {e}", "error")
+                    summary = context[:max_nums]
+
+                context[:max_nums] = [summary]
+
+                model.system = s
+
+                if save_context:
+                    self.context = context
+                    await self.save_context()
+
+                # TODO: Trim the context to remove older entries if needed explicitly
+
+                return context
 
     async def route_query(self, query: str, manual: bool):
         if not manual:
@@ -163,10 +204,10 @@ class AI:
                     return query, self.default_model
                 if part:
                     router_resp_parts.append(part)
-                    
+
             router_resp_raw = "".join(router_resp_parts).strip()
             selected_role = None
-            
+
             await log(f"Router raw response: {router_resp_raw}", "info")
 
             try:
@@ -175,7 +216,7 @@ class AI:
                     selected_role = router_resp.get("model", router_resp.get("role", "")).strip().lower()
             except json.JSONDecodeError:
                 selected_role = router_resp_raw.lower().strip()
-            
+
             if selected_role in self.models:
                 await log(f"Router selected model '{selected_role}'.", "info")
                 return query, selected_role
@@ -200,11 +241,12 @@ class AI:
             else:
                 await log(f"No or incorrect prefix, using default '{self.default_model}'", "info")
                 return query, self.default_model
-                
-    async def generate(self, query, stream: None | bool = None, manual_routing=False, think=None, image_path=None):
+
+    async def generate(self, query, stream: None | bool = None, manual_routing=False, think=None, image_path=None, max_summarize_nums=20, 
+                       summarize_model_role='chat',summary_pair=False):
         query, model_name = await self.route_query(query, manual_routing)
         model = self.models[model_name]
-        
+
         if stream is None:
             stream = self.platform not in STREAM_DISABLED
 
@@ -218,27 +260,27 @@ class AI:
             async for (thinking_chunk, content_chunk, tools_chunk) in model.generate(query, self.context, True,think=think, image_path=image_path):
                 if content_chunk == ERROR_TOKEN:
                     break
-                    
+
                 if thinking_chunk:
                     thinking_final += thinking_chunk
                 if content_chunk:
                     content_final += content_chunk
-                    
+
                 if tools_chunk:
                     print("\n--- Tool Call Chunk Detected ---\n", flush=True)
                     if tools_called is None:
                         tools_called = []
                     tools_called.extend(tools_chunk)
-                    
+
                 yield (thinking_chunk, content_chunk)
-                
+
         else:
             await log(f"Non-streaming mode active", "info")
-            async for (thinking, content, tools) in model.generate(query,self.context, False, think=think,image_path=image_path):
+            async for (thinking, content, tools) in model.generate(query,self.context, False,think=think,image_path=image_path):
                 await log(f"Got non-streaming response chunk", "info")
                 if content == ERROR_TOKEN:
                     break
-                    
+
                 thinking_final = thinking or ""
                 content_final = content or ""
                 tools_called = tools
@@ -260,29 +302,31 @@ class AI:
                 else: 
                     print(f"\n--- Tool '{tool_name}' returned no result ---\n", flush=True)
 
+        await self.summarise_context(self.context, max_nums=max_summarize_nums, model_role=summarize_model_role, pair=summary_pair, save_context=True)
+
         await self.save_context()
     
     async def execute_tools(self, tools):
         results = {}
         if not tools:
             return results
-            
+
         available_tools = {}
-        
+
         for tool in tools:
             if not isinstance(tool, dict) or 'function' not in tool:
                 await log(f"Invalid tool format: {tool}", "warn")
                 continue
-                
+
             await log(f"Executing tool: {tool['function'].get('name')}", "info")    
             tool_name = tool['function'].get('name')
             tool_args = tool['function'].get('arguments', {})
-            
+
             if tool_name not in available_tools:
                 await log(f"Tool '{tool_name}' not available. Available tools: {list(available_tools.keys())}", "warn")
                 results[tool_name] = f"Tool '{tool_name}' not found"
                 continue
-                
+
             try:
                 results[tool_name] = await available_tools[tool_name](**tool_args)
                 await log(f"Tool '{tool_name}' executed successfully.", "success")
@@ -297,12 +341,12 @@ class AI:
             task.cancel()
         for model in self.models.values():
             await model.shutdown()
-        
+
         await self.save_context()
         print("Done.")
-
+  
 async def main():
-    ai = AI("main/Models_config.json")
+    ai = AI("main/Models_config_test.json")
     await ai.init("cli")
 
     loop = asyncio.get_running_loop()
@@ -325,7 +369,7 @@ async def main():
             req = "/bye"
         except (KeyboardInterrupt, signal.default_int_handler):
             req = "/bye"
-        
+
         if shutdown_event.is_set():
             break
 
