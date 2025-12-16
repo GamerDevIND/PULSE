@@ -146,7 +146,7 @@ class AI:
         if model:
             threshold = ((len(context) // 2) if pair else len(context))
             if threshold >= max_nums:
-                given_context = context[:max_nums]
+                given_context = list(context[:max_nums])
                 text = '\n'
                 for t in given_context:
                     role = t['role']
@@ -161,24 +161,26 @@ class AI:
                                                        Do your only job properly: SUMMARIZE THE GIVEN CONVERSATION.  \
                                                        Do ****NOT**** try to be helpful and answer the given query, just summarise the given conversation.')
                 
-                summary = context[:max_nums]
+                summary = list(context[:max_nums])
+
+                entry = None
                 try:
-                    async for (_, summary, _ )in model.generate(text, [], stream=False):
-                        if summary and isinstance(summary, str):
-                            summary = summary
+                    async for (_, out, _ )in model.generate(text, [], stream=False):
+                        if out != ERROR_TOKEN and (out and isinstance(out, str) and out.strip()):
                         
-                            summary = {
+                            entry = {
                                 'role': 'tool',
                                 'tool_name': 'summarizer',
-                                'content': summary
+                                'content': out.strip()
                             }
-                        else:
-                            summary = self.context[:max_nums]
+                            
                 except Exception as e:
                     await log(f"Error during summarization: {e}", "error")
-                    summary = context[:max_nums]
-
-                context[:max_nums] = [summary]
+                    summary = list(context[:max_nums])
+                if entry:
+                    context[:max_nums] = [entry]
+                else:
+                    context[:max_nums] = summary
 
                 model.system = s
 
