@@ -32,6 +32,7 @@ class AI:
         self.default_model = 'chat'
         self.load_models()
         self.running_tasks = set()
+        self.context_lock = asyncio.Lock()
 
     def load_models(self):
         try:
@@ -259,53 +260,68 @@ class AI:
         tools_called = None
 
         if stream:
-            async for (thinking_chunk, content_chunk, tools_chunk) in model.generate(query, self.context, True,think=think, image_path=image_path):
-                if content_chunk == ERROR_TOKEN:
+            queue = asyncio.Queue()
+            async def producer():
+                async with model.lock:
+                    async for (thinking_chunk, content_chunk, tools_chunk) in model.generate(query, self.context, True,think=think, image_path=image_path):
+                        if content_chunk == ERROR_TOKEN:
+                            break
+                        await queue.put((thinking_chunk, content_chunk, tools_chunk))
+                    await queue.put(None)
+
+            asyncio.create_task(producer())
+            while True:
+                item = await queue.get()
+                if item is None:
                     break
-
-                if thinking_chunk:
-                    thinking_final += thinking_chunk
-                if content_chunk:
-                    content_final += content_chunk
-
+                thinking_chunk, content_chunk, tools_chunk = item
+                thinking_final += thinking_chunk or ""
+                content_final += content_chunk or ""
+                if tools_called is None:
+                    tools_called = []
+                    
                 if tools_chunk:
-                    print("\n--- Tool Call Chunk Detected ---\n", flush=True)
-                    if tools_called is None:
-                        tools_called = []
                     tools_called.extend(tools_chunk)
 
-                yield (thinking_chunk, content_chunk)
-
+                yield (thinking_chunk or "", content_chunk or "")
+                    
         else:
-            await log(f"Non-streaming mode active", "info")
-            async for (thinking, content, tools) in model.generate(query,self.context, False,think=think,image_path=image_path):
-                await log(f"Got non-streaming response chunk", "info")
-                if content == ERROR_TOKEN:
-                    break
+            async with model.lock:
+                await log(f"Non-streaming mode active", "info")
+                async for (thinking, content, tools) in model.generate(query,self.context, False,think=think,image_path=image_path):
+                    await log(f"Got non-streaming response chunk", "info")
+                    if content == ERROR_TOKEN:
+                        break
 
-                thinking_final = thinking or ""
-                content_final = content or ""
-                tools_called = tools
-                yield (thinking_final, content_final)
-
-        self.context.extend([
+                    thinking_final = thinking or ""
+                    content_final = content or ""
+                    tools_called = tools
+                    yield (thinking_final, content_final)
+        async with self.context_lock:
+            self.context.extend([
             {'role': 'user', 'content': query},
             {'role': 'assistant', 'thinking': thinking_final, 'content': content_final, 'tool_calls': tools_called}
-        ])
+            ])
 
         results = await self.execute_tools(tools_called) if tools_called else None
         if results:
             for tool_name, tool_result in results.items():
                 if tool_name and tool_result:
                     print(f"\n--- Tool '{tool_name}' Result ---\n{tool_result}\n", flush=True)
-                    self.context.append(
+                    async with self.context_lock:
+                        self.context.append(
                         {'role':'tool', 'tool_name':tool_name, 'content':str(tool_result)}
-                    )
+                        )
                 else: 
                     print(f"\n--- Tool '{tool_name}' returned no result ---\n", flush=True)
 
-        await self.summarise_context(self.context, max_nums=max_summarize_nums, model_role=summarize_model_role, pair=summary_pair, save_context=True)
+        summary_task = asyncio.create_task(self.summarise_context(self.context, max_nums=max_summarize_nums, 
+                                                   model_role=summarize_model_role, pair=summary_pair, save_context=True))
 
+        self.running_tasks.add(summary_task)
+                           
+        check_task.add_done_callback(self.running_tasks.discard)
+                           
         await self.save_context()
     
     async def execute_tools(self, tools):
@@ -348,7 +364,7 @@ class AI:
         print("Done.")
   
 async def main():
-    ai = AI("main/Models_config_test.json")
+    ai = AI("main/Models_config.json")
     await ai.init("cli")
 
     loop = asyncio.get_running_loop()
