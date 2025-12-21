@@ -5,8 +5,8 @@ import subprocess
 import aiohttp
 import aiofiles
 import av
-from utils import log
-from configs import ERROR_TOKEN, VIDEO_EXTs, IMAGE_EXTs
+from .utils import log
+from .configs import ERROR_TOKEN, VIDEO_EXTs, IMAGE_EXTs
 import base64
 from io import BytesIO
 
@@ -32,6 +32,7 @@ class Model:
         self.use_mmap = False
         self.has_video = False
         self.tools = []
+        self.lock = asyncio.Lock()
 
     async def __aenter__(self):
         await self.warm_up()
@@ -110,7 +111,7 @@ class Model:
 
         if self.warmed_up:
             if self.process and self.process.poll() is None:
-                await log(f"✅ {self.name} process is already running and warmed up. Skipping restart.", "success")
+                await log(f"{self.name} process is already running and warmed up. Skipping restart.", "success")
                 return
 
         if self.process is not None:
@@ -358,6 +359,20 @@ class Model:
 
     async def shutdown(self):
         await log(f"Shutting down {self.name}...", "info")
+
+        url = f'{self.host}{self._get_endpoint()}'
+
+        headers = {"Content-Type": "application/json"}
+        data = {
+            'model': self.ollama_name,
+            'keep_alive': 0
+        }
+
+        async with self.session.post(url, headers=headers, data=json.dumps(data)) as response:  # type: ignore
+            response.raise_for_status()
+            if response.status == 200:
+                await log(f"{self.name} acknowledged shutdown request.", "success")
+
         if self.session is not None:
             try:
                 await self.session.close()
