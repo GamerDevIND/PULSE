@@ -1,39 +1,52 @@
-from subprocess import run, Popen
+import asyncio
 import json
+import subprocess
+import sys
 import time
+from pathlib import Path
 
-commands_1 = "pip install -r requirements.txt "
-commands_2 = ""
-ollama = input("Do you have Ollama installed? (Y/N) ").lower()
-if ollama == "n":
-    os = input("Which OS are you using? (W for Windows / L for Linux / M for MacOS) ").lower()
-    if os == "l":
-        if input("Do you want to install Ollama now? (Y/N) ").lower() == "y":
-            commands_1 += "&& curl -fsSL https://ollama.com/install.sh | sh"
-        else: 
-            print("Ollama is required")
-            exit()
-    else:
-        print("Please install Ollama first: https://ollama.com/download")
-        exit()
+def run_command(args):
+    try:
+        subprocess.run(args, check=True)
+    except subprocess.CalledProcessError as e:
+        print(f"Error executing {' '.join(args)}: {e}")
+        sys.exit(1)
 
-models = input("Do you have the models config JSON file configured? (Y/N) ").lower()
-if models == "y":
-    if input("Would you like to download the configured models? (Y/N) ").lower() == 'y':
-        with open("main/Models_config.json") as f:
-            model_file:list[dict] = json.load(f)
-            for model in model_file:
-                name = model.get("ollama_name")
-                if name is not None:
-                    commands_2 += f"ollama pull {name} &&"
+async def setup():
+    run_command([sys.executable, "-m", "pip", "install", "-r", "requirements.txt"])
+
+    ollama_installed = input("Do you have Ollama installed? (y/n): ").lower() == 'y'
+    if not ollama_installed:
+        if sys.platform == "linux":
+            install = input("Linux detected. Install Ollama now? (y/n): ").lower() == 'y'
+            if install:
+                subprocess.run("curl -fsSL https://ollama.com/install.sh | sh", shell=True, check=True)
+        else:
+            print("Please download Ollama for your OS: https://ollama.com/download")
+            return
+        
+    config_path = Path("main/Models_config.json")
+    if config_path.exists():
+        download = input(f"Found {config_path}. Download models now? (y/n): ").lower() == 'y'
+        if download:
+            with open(config_path) as f:
+                models = json.load(f)
             
-            commands_2 += "echo done"
-else:            
-    print("Please install the desired models")
-    exit()
 
-run(commands_1, shell=True, check=True)
-s = Popen(['ollama', 'serve'], )
-time.sleep(0.1)
-run(commands_2, shell=True, check=True)
-s.terminate()
+            serve_proc = subprocess.Popen(["ollama", "serve"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            time.sleep(3)
+            
+            try:
+                for model in models:
+                    name = model.get("ollama_name")
+                    if name:
+                        print(f"Pulling {name}...")
+                        subprocess.run(["ollama", "pull", name], check=True)
+            finally:
+                serve_proc.terminate()
+                print("Setup Complete.")
+    else:
+        print(f"Warning: {config_path} not found. Skipping model downloads.")
+
+if __name__ == "__main__":
+    asyncio.run(setup())
