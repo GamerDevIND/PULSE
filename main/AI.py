@@ -2,10 +2,9 @@ import asyncio
 import aiofiles
 import aiohttp
 import json
-import signal
-from utils import log, load_tools
-from models import Model
-from configs import ( 
+from .utils import log, load_tools
+from .models import Model
+from .configs import ( 
     CoT_PROMPT, 
     CHAT_PROMPT, 
     ROUTER_PROMPT, 
@@ -47,7 +46,8 @@ class AI:
             print(f"🟥 Error loading models: {e}")
             exit(1)
 
-    async def init(self, platform: str):
+    async def init(self, platform: str, max_summarize_nums=20, 
+            summarize_model_role='chat',summary_pair=False):
         self.context = await self.load_context()
         self.platform = platform
 
@@ -66,6 +66,11 @@ class AI:
         check_task = asyncio.create_task(self.check_models())
         self.running_tasks.add(check_task)
         check_task.add_done_callback(self.running_tasks.discard)
+
+        summary_task = asyncio.create_task(self.summarise_context(self.context, max_nums=max_summarize_nums, 
+                                                                  model_role=summarize_model_role, pair=summary_pair, save_context=True))
+        self.running_tasks.add(summary_task)
+        summary_task.add_done_callback(self.running_tasks.discard)
 
     async def load_context(self):
         try:
@@ -125,23 +130,31 @@ class AI:
                     if cooldowns[name] > 0:
                         cooldowns[name] -= 1
                         continue
-                    is_terminated = model.process and model.process.returncode is not None
+
+                    is_terminated = False
+                    if model.process is not None:
+                        is_terminated = model.process.poll() is not None
+                        
                     is_alive = await self._ping_model_tag(model.host)
                     is_responding = False
                     if is_alive:
                         is_responding = await self._test_model(model.host, model.ollama_name)
+
                     if is_terminated or not is_responding or not is_alive:
                         cooldowns[name] = 4
                         await log( f"{model.name} crashed/unresponsive " f"(Terminated: {is_terminated}, \
                                   Unresponsive: {not is_alive}, responding: {is_responding}). " f"Restarting ONLY this model.", "warn" )
                         await model.warm_up()
                 except Exception as e:
-                    await log(f"Error while checking models: {e}", 'error')
+                    if str(e) == '':
+                        continue
+                    await log(f"Error while checking models: {str(e)}", 'error')
             await asyncio.sleep(interval)
 
     async def summarise_context(self, context = None, max_nums = 20, model_role = 'summarizer' , pair = False, save_context = True):
         if context is None:
-            context = self.context
+            async with self.context_lock:
+                context = list(self.context)
 
         model = self.models.get(model_role)
         if model:
@@ -166,14 +179,15 @@ class AI:
 
                 entry = None
                 try:
-                    async for (_, out, _ )in model.generate(text, [], stream=False):
-                        if out != ERROR_TOKEN and (out and isinstance(out, str) and out.strip()):
-                        
-                            entry = {
-                                'role': 'tool',
-                                'tool_name': 'summarizer',
-                                'content': out.strip()
-                            }
+                    async with model.lock:
+                        async for (_, out, _ )in model.generate(text, [], stream=False):
+                            if out != ERROR_TOKEN and (out and isinstance(out, str) and out.strip()):
+                            
+                                entry = {
+                                    'role': 'tool',
+                                    'tool_name': 'summarizer',
+                                    'content': out.strip()
+                                }
                             
                 except Exception as e:
                     await log(f"Error during summarization: {e}", "error")
@@ -186,8 +200,9 @@ class AI:
                 model.system = s
 
                 if save_context:
-                    self.context = context
-                    await self.save_context()
+                    async with self.context_lock:
+                        self.context = context
+                        await self.save_context()
 
                 # TODO: Trim the context to remove older entries if needed explicitly
 
@@ -201,12 +216,16 @@ class AI:
                 return query, self.default_model
 
             router_resp_parts = []
-            async for thinking, part, tools in router_model.generate(query, self.context, stream=False):
-                if part == ERROR_TOKEN:
-                    await log("Router API call failed. Using default.", "error")
-                    return query, self.default_model
-                if part:
-                    router_resp_parts.append(part)
+            async with self.context_lock:
+                context = list(self.context)
+
+            async with router_model.lock:
+                async for _, part, _ in router_model.generate(query, context, stream=False):
+                    if part == ERROR_TOKEN:
+                        await log("Router API call failed. Using default.", "error")
+                        return query, self.default_model
+                    if part:
+                        router_resp_parts.append(part)
 
             router_resp_raw = "".join(router_resp_parts).strip()
             selected_role = None
@@ -245,8 +264,7 @@ class AI:
                 await log(f"No or incorrect prefix, using default '{self.default_model}'", "info")
                 return query, self.default_model
 
-    async def generate(self, query, stream: None | bool = None, manual_routing=False, think=None, image_path=None, max_summarize_nums=20, 
-                       summarize_model_role='chat',summary_pair=False):
+    async def generate(self, query, stream: None | bool = None, manual_routing=False, think=None, image_path=None):
         query, model_name = await self.route_query(query, manual_routing)
         model = self.models[model_name]
 
@@ -259,11 +277,14 @@ class AI:
         thinking_final = ""
         tools_called = None
 
+        async with self.context_lock:
+            context = list(self.context)
+
         if stream:
             queue = asyncio.Queue()
             async def producer():
                 async with model.lock:
-                    async for (thinking_chunk, content_chunk, tools_chunk) in model.generate(query, self.context, True,think=think, image_path=image_path):
+                    async for (thinking_chunk, content_chunk, tools_chunk) in model.generate(query, context, True,think=think, image_path=image_path):
                         if content_chunk == ERROR_TOKEN:
                             break
                         await queue.put((thinking_chunk, content_chunk, tools_chunk))
@@ -288,7 +309,7 @@ class AI:
         else:
             async with model.lock:
                 await log(f"Non-streaming mode active", "info")
-                async for (thinking, content, tools) in model.generate(query,self.context, False,think=think,image_path=image_path):
+                async for (thinking, content, tools) in model.generate(query, context, False, think=think, image_path=image_path):
                     await log(f"Got non-streaming response chunk", "info")
                     if content == ERROR_TOKEN:
                         break
@@ -314,14 +335,7 @@ class AI:
                         )
                 else: 
                     print(f"\n--- Tool '{tool_name}' returned no result ---\n", flush=True)
-
-        summary_task = asyncio.create_task(self.summarise_context(self.context, max_nums=max_summarize_nums, 
-                                                   model_role=summarize_model_role, pair=summary_pair, save_context=True))
-
-        self.running_tasks.add(summary_task)
-                           
-        check_task.add_done_callback(self.running_tasks.discard)
-                           
+ 
         await self.save_context()
     
     async def execute_tools(self, tools):
@@ -362,64 +376,3 @@ class AI:
 
         await self.save_context()
         print("Done.")
-  
-async def main():
-    ai = AI("main/Models_config.json")
-    await ai.init("cli")
-
-    loop = asyncio.get_running_loop()
-    shutdown_event = asyncio.Event()
-
-    def signal_handler():
-        print("\nReceived shutdown signal. Initiating graceful shutdown...")
-        asyncio.create_task(ai.shut_down())
-        shutdown_event.set()
-
-    loop.add_signal_handler(signal.SIGINT, signal_handler)
-    loop.add_signal_handler(signal.SIGTERM, signal_handler)
-    if hasattr(signal, "SIGHUP"):
-        loop.add_signal_handler(signal.SIGHUP, signal_handler)
-
-    while not shutdown_event.is_set():
-        try:
-            req = await loop.run_in_executor(None, input, ">>> ")
-        except EOFError:
-            req = "/bye"
-        except (KeyboardInterrupt, signal.default_int_handler):
-            req = "/bye"
-
-        if shutdown_event.is_set():
-            break
-
-        if req.strip() == "/bye":
-            await ai.shut_down()
-            break
-
-        image_path = None
-        if req.startswith("!vision"):
-            req = req.removeprefix("!vision").strip()
-            parts = req.split("|", 1)
-            if len(parts) == 2:
-                image_path, req = parts
-                image_path = image_path.strip()
-                req = req.strip()
-            else:
-                image_path = None
-                req = parts[0].strip()
-                await log("No image path provided. Continuing with text only.", "warn")
-
-        if not any(m.has_vision for m in ai.models.values()):
-            await log("No vision models available. Skipping image input.", "warn")
-            image_path = None
-
-        try:
-            async for (thinking, res) in ai.generate(req, manual_routing=False, image_path=image_path):
-                print(res, flush=True, end="")
-            print()
-            await log("Generation Completed", "success")
-        except Exception as e:
-            await log(f"Main loop error: {e}", "error")
-            break
-
-if __name__ == "__main__":
-    asyncio.run(main())
