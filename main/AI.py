@@ -1,9 +1,11 @@
+
 import asyncio
 import aiofiles
 import aiohttp
 import json
 from .utils import log, load_tools
 from .models import Model
+from .Events import Event_Manager
 from .configs import ( 
     CoT_PROMPT, 
     CHAT_PROMPT, 
@@ -16,6 +18,11 @@ from .configs import (
     SUMMARIZER_PROMPT
 )
 
+def on_event(event_name):
+    def decorator(func):
+        func._event_trigger = event_name
+        return func
+    return decorator
 class AI:
     def __init__(self, model_config_path="main/Models_config.json", context_path="main/saves/context.json"):
         self.model_config_path = model_config_path
@@ -46,31 +53,49 @@ class AI:
             print(f"🟥 Error loading models: {e}")
             exit(1)
 
-    async def init(self, platform: str, max_summarize_nums=20, 
-            summarize_model_role='chat',summary_pair=False):
+    async def init(self, platform: str, tools:list=[], max_summarize_nums=20, 
+                summarize_model_role='chat', summary_pair=False):
         self.context = await self.load_context()
         self.platform = platform
+        self.event_manager = Event_Manager()
+        await self.event_manager.start_event()
+
+        for name in dir(self):
+            method = getattr(self, name)
+            if hasattr(method, "_event_trigger"):
+                self.event_manager.on(method._event_trigger)(method)
 
         await log("Warming up all models...", "info", append=False)
-
-        available_tools = []
+        self.available_functions = [*tools]
+        self.available_tools = {str(t.__name__): t for t in self.available_functions}
 
         for model in self.models.values():
             if model.has_tools:
-                tools = await load_tools(*available_tools)
-                await model.add_tools(*tools)
-                await log(f"Tools added to {model.name}", "info")
-
+                tool_defs = await load_tools(*self.available_functions)
+                await model.add_tools(*tool_defs)
             await model.warm_up()
-
         check_task = asyncio.create_task(self.check_models())
         self.running_tasks.add(check_task)
-        check_task.add_done_callback(self.running_tasks.discard)
 
-        summary_task = asyncio.create_task(self.summarise_context(self.context, max_nums=max_summarize_nums, 
-                                                                  model_role=summarize_model_role, pair=summary_pair, save_context=True))
-        self.running_tasks.add(summary_task)
-        summary_task.add_done_callback(self.running_tasks.discard)
+        summarizer_task = asyncio.create_task(self.summarise_context(
+            max_nums=max_summarize_nums,
+            model_role=summarize_model_role,
+            pair=summary_pair,
+            save_context=True
+        ))
+        self.running_tasks.add(summarizer_task)
+
+        check_task.add_done_callback(lambda t: self.running_tasks.discard(t))
+        summarizer_task.add_done_callback(lambda t: self.running_tasks.discard(t))
+
+    @on_event("save_context_requested")
+    async def _handle_save_event(self, **kwargs):
+        await self.save_context()
+
+    @on_event("execute_tools_requested")
+    async def _handle_tool_event(self, tools, **kwargs):
+        if tools:
+            asyncio.create_task(self.execute_tools(tools))
 
     async def load_context(self):
         try:
@@ -81,11 +106,17 @@ class AI:
             return []
 
     async def save_context(self):
+        await self.event_manager.emit("save_context_started")
         try:
+            async with self.context_lock:
+                data_to_save = json.dumps(self.context, indent=2)
+
             async with aiofiles.open(self.context_path, "w") as file:
-                await file.write(json.dumps(self.context, indent=2))
+                await file.write(data_to_save)
+                await self.event_manager.emit("save_context_completed")
         except IOError as e:
             await log(f"Error saving context: {e}", "error")
+            await self.event_manager.emit("save_context_failed", error=str(e))
 
     async def _test_model(self, url, ollama_name ):
         try:
@@ -126,29 +157,25 @@ class AI:
 
         while True:
             for name, model in self.models.items():
-                try:
-                    if cooldowns[name] > 0:
-                        cooldowns[name] -= 1
-                        continue
+                if model.state in ["down", "shutting down", "warming up"]:
+                    continue
 
-                    is_terminated = False
-                    if model.process is not None:
-                        is_terminated = model.process.poll() is not None
-                        
-                    is_alive = await self._ping_model_tag(model.host)
-                    is_responding = False
-                    if is_alive:
-                        is_responding = await self._test_model(model.host, model.ollama_name)
+                if cooldowns[name] > 0:
+                    cooldowns[name] -= 1
+                    continue
 
-                    if is_terminated or not is_responding or not is_alive:
-                        cooldowns[name] = 4
-                        await log( f"{model.name} crashed/unresponsive " f"(Terminated: {is_terminated}, \
-                                  Unresponsive: {not is_alive}, responding: {is_responding}). " f"Restarting ONLY this model.", "warn" )
-                        await model.warm_up()
-                except Exception as e:
-                    if str(e) == '':
-                        continue
-                    await log(f"Error while checking models: {str(e)}", 'error')
+                is_alive = await self._ping_model_tag(model.host)
+                
+                is_terminated = model.process.poll() is not None if model.process else True
+
+                if not is_alive:
+                    await log(f"CRITICAL: {model.name} API is down. Restarting...", "error")
+                    cooldowns[name] = 5
+                    await model.warm_up()
+
+                elif is_terminated:
+                    model.state = "idle" 
+            
             await asyncio.sleep(interval)
 
     async def summarise_context(self, context = None, max_nums = 20, model_role = 'summarizer' , pair = False, save_context = True):
@@ -169,9 +196,8 @@ class AI:
                     if role != 'tool':
                         text += f"{role} : {content}\n"
                 
-                s = model.system
 
-                model.system = self.system_prompts.get('summarizer', 'This is a conversation log. Produce a factual, neutral summary.\n\
+                system = self.system_prompts.get('summarizer', 'This is a conversation log. Produce a factual, neutral summary.\n\
                                                        Do your only job properly: SUMMARIZE THE GIVEN CONVERSATION.  \
                                                        Do ****NOT**** try to be helpful and answer the given query, just summarise the given conversation.')
                 
@@ -179,15 +205,14 @@ class AI:
 
                 entry = None
                 try:
-                    async with model.lock:
-                        async for (_, out, _ )in model.generate(text, [], stream=False):
-                            if out != ERROR_TOKEN and (out and isinstance(out, str) and out.strip()):
+                    async for (_, out, _ )in model.generate(text, [], stream=False, system_prompt_override=system):
+                        if out != ERROR_TOKEN and (out and isinstance(out, str) and out.strip()):
                             
-                                entry = {
-                                    'role': 'tool',
-                                    'tool_name': 'summarizer',
-                                    'content': out.strip()
-                                }
+                            entry = {
+                                'role': 'tool',
+                                'tool_name': 'summarizer',
+                                'content': out.strip()
+                            }
                             
                 except Exception as e:
                     await log(f"Error during summarization: {e}", "error")
@@ -197,12 +222,10 @@ class AI:
                 else:
                     context[:max_nums] = summary
 
-                model.system = s
-
                 if save_context:
                     async with self.context_lock:
                         self.context = context
-                        await self.save_context()
+                        await self.event_manager.emit("save_context_requested")
 
                 # TODO: Trim the context to remove older entries if needed explicitly
 
@@ -219,13 +242,12 @@ class AI:
             async with self.context_lock:
                 context = list(self.context)
 
-            async with router_model.lock:
-                async for _, part, _ in router_model.generate(query, context, stream=False):
-                    if part == ERROR_TOKEN:
-                        await log("Router API call failed. Using default.", "error")
-                        return query, self.default_model
-                    if part:
-                        router_resp_parts.append(part)
+            async for _, part, _ in router_model.generate(query, context, stream=False):
+                if part == ERROR_TOKEN:
+                    await log("Router API call failed. Using default.", "error")
+                    return query, self.default_model
+                if part:
+                    router_resp_parts.append(part)
 
             router_resp_raw = "".join(router_resp_parts).strip()
             selected_role = None
@@ -241,27 +263,34 @@ class AI:
 
             if selected_role in self.models:
                 await log(f"Router selected model '{selected_role}'.", "info")
+                await self.event_manager.emit("router_selected", query=query, selected_role=selected_role)
                 return query, selected_role
             else:
                 await log(f"Router selected unknown role or failed to parse ('{selected_role}'). Using default '{self.default_model}'.", "warn")
+                await self.event_manager.emit("router_selected", query=query, selected_role=self.default_model)
                 return query, self.default_model
         else:
             if query.startswith("!chat"):
                 query = query.removeprefix("!chat").strip()
                 self.models['chat'].system = CHAT_PROMPT
+                await self.event_manager.emit("router_selected", query=query, selected_role="chat")
                 return query, "chat"
             elif query.startswith("!cot"):
                 query = query.removeprefix("!cot").strip()
+                await self.event_manager.emit("router_selected", query=query, selected_role="cot")
                 return query, "cot"
             elif query.startswith("!chaos"):
                 query = query.removeprefix("!chaos").strip()
                 self.models['chat'].system = CHAOS_PROMPT
+                await self.event_manager.emit("router_selected", query=query, selected_role="chat")
                 return query, "chat"
             elif query.startswith("!vision"):
                 query = query.removeprefix("!vision").strip()
+                await self.event_manager.emit("router_selected", query=query, selected_role="vision")
                 return query, "vision"
             else:
                 await log(f"No or incorrect prefix, using default '{self.default_model}'", "info")
+                await self.event_manager.emit("router_selected", query=query, selected_role=self.default_model)
                 return query, self.default_model
 
     async def generate(self, query, stream: None | bool = None, manual_routing=False, think=None, image_path=None):
@@ -280,15 +309,16 @@ class AI:
         async with self.context_lock:
             context = list(self.context)
 
+        await self.event_manager.emit("generation_started", model_name=model_name, query=query)
+
         if stream:
             queue = asyncio.Queue()
             async def producer():
-                async with model.lock:
-                    async for (thinking_chunk, content_chunk, tools_chunk) in model.generate(query, context, True,think=think, image_path=image_path):
-                        if content_chunk == ERROR_TOKEN:
-                            break
-                        await queue.put((thinking_chunk, content_chunk, tools_chunk))
-                    await queue.put(None)
+                async for (thinking_chunk, content_chunk, tools_chunk) in model.generate(query, context, True,think=think, image_path=image_path):
+                    if content_chunk == ERROR_TOKEN:
+                        break
+                    await queue.put((thinking_chunk, content_chunk, tools_chunk))
+                await queue.put(None)
 
             asyncio.create_task(producer())
             while True:
@@ -304,46 +334,37 @@ class AI:
                 if tools_chunk:
                     tools_called.extend(tools_chunk)
 
+                await self.event_manager.emit("generation_chunk", model_name=model_name, thinking_chunk=thinking_chunk, content_chunk=content_chunk)
+
                 yield (thinking_chunk or "", content_chunk or "")
                     
         else:
-            async with model.lock:
-                await log(f"Non-streaming mode active", "info")
-                async for (thinking, content, tools) in model.generate(query, context, False, think=think, image_path=image_path):
-                    await log(f"Got non-streaming response chunk", "info")
-                    if content == ERROR_TOKEN:
-                        break
+            async for (thinking, content, tools) in model.generate(query, context, False, think=think, image_path=image_path):
+                await log(f"Got non-streaming response chunk", "info")
+                if content == ERROR_TOKEN:
+                    break
 
-                    thinking_final = thinking or ""
-                    content_final = content or ""
-                    tools_called = tools
-                    yield (thinking_final, content_final)
+                thinking_final = thinking or ""
+                content_final = content or ""
+                tools_called = tools
+                await self.event_manager.emit("generation_chunk", model_name=model_name, thinking_chunk=thinking, content_chunk=content)
+                yield (thinking_final, content_final)
+
+        await self.event_manager.emit("generation_completed", model_name=model_name, query=query, final_thinking=thinking_final, final_content=content_final, tools_called=tools_called)       
         async with self.context_lock:
             self.context.extend([
             {'role': 'user', 'content': query},
             {'role': 'assistant', 'thinking': thinking_final, 'content': content_final, 'tool_calls': tools_called}
             ])
 
-        results = await self.execute_tools(tools_called) if tools_called else None
-        if results:
-            for tool_name, tool_result in results.items():
-                if tool_name and tool_result:
-                    print(f"\n--- Tool '{tool_name}' Result ---\n{tool_result}\n", flush=True)
-                    async with self.context_lock:
-                        self.context.append(
-                        {'role':'tool', 'tool_name':tool_name, 'content':str(tool_result)}
-                        )
-                else: 
-                    print(f"\n--- Tool '{tool_name}' returned no result ---\n", flush=True)
- 
-        await self.save_context()
-    
+        await self.event_manager.emit("execute_tools_requested", tools=tools_called)
+
+        await self.event_manager.emit_and_wait("save_context_requested")
+
     async def execute_tools(self, tools):
         results = {}
         if not tools:
             return results
-
-        available_tools = {}
 
         for tool in tools:
             if not isinstance(tool, dict) or 'function' not in tool:
@@ -354,21 +375,32 @@ class AI:
             tool_name = tool['function'].get('name')
             tool_args = tool['function'].get('arguments', {})
 
-            if tool_name not in available_tools:
-                await log(f"Tool '{tool_name}' not available. Available tools: {list(available_tools.keys())}", "warn")
+            if tool_name not in self.available_tools:
+                await log(f"Tool '{tool_name}' not available. Available tools: {list(self.available_tools.keys())}", "warn")
                 results[tool_name] = f"Tool '{tool_name}' not found"
                 continue
 
             try:
-                results[tool_name] = await available_tools[tool_name](**tool_args)
+                results[tool_name] = await self.available_tools[tool_name](**tool_args)
+
+                await self.event_manager.emit("tool_executed", tool_name=tool_name, tool_args=tool_args, result=results[tool_name])
+
                 await log(f"Tool '{tool_name}' executed successfully.", "success")
             except Exception as e:
                 await log(f"Error executing tool '{tool_name}': {e}", "error")
                 results[tool_name] = f"Error executing tool '{tool_name}': {e}"
+
+            async with self.context_lock:
+                    self.context.append(
+                    {'role':'tool', 'tool_name':tool_name, 'content':str(results[tool_name])}
+                    )
+
+        await self.event_manager.emit_and_wait("save_context_requested", results=results)
         return results
 
     async def shut_down(self):
         await log("Shutting Down all services...", "info")
+        await self.event_manager.stop_event()
         for task in self.running_tasks:
             task.cancel()
         for model in self.models.values():
