@@ -38,7 +38,7 @@ class Model:
     async def __aenter__(self):
         await self.warm_up()
         return self
-    
+
     async def __aexit__(self, exc_type, exc_val, exc_tb):
         await self.shutdown()
 
@@ -279,7 +279,7 @@ class Model:
         self.warmed_up = True
         await log(f"{self.name} ({self.ollama_name}) warmed up!", "success")
         self.state = "idle"
-        
+
     async def add_tools(self, *tool_dict):
         self.tools.extend(tool_dict)
 
@@ -299,7 +299,7 @@ class Model:
                 messages.append({'role': "system", 'content': self.system})
         else:
             messages.append({'role': "system", 'content': system_prompt_override})
-            
+
         messages += context + [{"role": "user", "content": query}]
 
         headers = {"Content-Type": "application/json"}
@@ -411,20 +411,6 @@ class Model:
             except Exception as e:
                 await log(f"Error sending keep_alive: 0 to {self.name}: {e}", 'warn')
 
-        if self.session is not None:
-            try:
-                url = f'{self.host}{self._get_endpoint()}'
-                headers = {"Content-Type": "application/json"}
-                data = {
-                    'model': self.ollama_name,
-                    'keep_alive': 0
-                }
-                async with self.session.post(url, headers=headers, data=json.dumps(data)) as response:
-                    response.raise_for_status()
-                    if response.status == 200:
-                        await log(f"{self.name} acknowledged shutdown request.", "success")
-            except Exception as e:
-                await log(f"Error sending keep_alive: 0 to {self.name}: {e}", 'warn')
 
         if self.session is not None:
             try:
