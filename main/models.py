@@ -32,6 +32,7 @@ class Model:
         self.use_mmap = False
         self.has_video = False
         self.tools = []
+        self.state = "idle"
         self.lock = asyncio.Lock()
 
     async def __aenter__(self):
@@ -108,6 +109,25 @@ class Model:
         self.custom_keep_alive_timeout = custom_keep_alive_timeout
         self.use_mmap = use_mmap
         self.has_video = has_video_processing
+
+        self.state = "warming up"
+
+        is_actually_alive = False
+        try:
+            async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=2)) as session:
+                async with session.get(f"{self.host}/api/tags") as res:
+                    if res.status == 200:
+                        is_actually_alive = True
+        except:
+            is_actually_alive = False
+
+        if is_actually_alive:
+            if not self.session or self.session.closed:
+                self.session = aiohttp.ClientSession()
+            self.warmed_up = True
+            self.state = "idle"
+            await log(f"{self.name} is already alive on {self.host}. Re-linked.", "success")
+            return
 
         if self.warmed_up:
             if self.process and self.process.poll() is None:
@@ -258,19 +278,28 @@ class Model:
 
         self.warmed_up = True
         await log(f"{self.name} ({self.ollama_name}) warmed up!", "success")
+        self.state = "idle"
         
     async def add_tools(self, *tool_dict):
         self.tools.extend(tool_dict)
 
-    async def generate(self, query: str, context: list[dict], stream: bool, think: str | bool | None = False, image_path: None | str = None, mod_ = 1):
+    async def generate(self, query: str, context: list[dict], stream: bool, think: str | bool | None = False, image_path: None | str = None, 
+                       mod_ = 1, system_prompt_override: str | None = None):
         await log(f"Generating response from {self.name}...", "info")
-        await log(f"Model {self.name} has_tools={self.has_tools}, tools count={len(self.tools)}", "info")
+
         endpoint = self._get_endpoint()
         url = f"{self.host}{endpoint}"
 
+        if not self.session or self.session.closed:
+            self.session = aiohttp.ClientSession()
+
         messages = []
-        if self.system:
-            messages.append({'role': "system", 'content': self.system})
+        if system_prompt_override is None:
+            if self.system:
+                messages.append({'role': "system", 'content': self.system})
+        else:
+            messages.append({'role': "system", 'content': system_prompt_override})
+            
         messages += context + [{"role": "user", "content": query}]
 
         headers = {"Content-Type": "application/json"}
@@ -291,6 +320,8 @@ class Model:
             }
         elif self.has_tools:
             data["tools"] = self.tools
+
+        self.state = "busy"
 
         options = {}
         if self.use_mmap:
@@ -326,52 +357,74 @@ class Model:
 
         buffer = ""
         try:
-            async with self.session.post(url, headers=headers, data=json.dumps(data)) as response:  # type: ignore
-                response.raise_for_status()
+            async with self.lock:
+                async with self.session.post(url, headers=headers, data=json.dumps(data)) as response:  # type: ignore
+                    response.raise_for_status()
 
-                if stream:
-                    async for chunk in response.content.iter_any():
-                        buffer += chunk.decode("utf-8")
-                        while "\n" in buffer:
-                            line, buffer = buffer.split("\n", 1)
-                            line = line.strip()
-                            if not line:
-                                continue
-                            try:
-                                json_line = json.loads(line)
+                    if stream:
+                        async for chunk in response.content.iter_any():
+                            buffer += chunk.decode("utf-8")
+                            while "\n" in buffer:
+                                line, buffer = buffer.split("\n", 1)
+                                line = line.strip()
+                                if not line:
+                                    continue
+                                try:
+                                    json_line = json.loads(line)
 
-                                thinking_chunk = json_line.get("message", {}).get("thinking", "")
-                                content_chunk = json_line.get("message", {}).get("content", "")
-                                tools_chunk = json_line.get("message", {}).get("tool_calls", []) 
-                                yield (thinking_chunk, content_chunk, tools_chunk)
-                            except json.JSONDecodeError:
-                                continue
-                else:
-                    res_json = await response.json()
-                    thinking = res_json.get("message", {}).get("thinking", "")
-                    content = res_json.get("message", {}).get("content", "")
-                    tools = res_json.get("message", {}).get("tool_calls", [])
-                    yield (thinking, content, tools)
+                                    thinking_chunk = json_line.get("message", {}).get("thinking", "")
+                                    content_chunk = json_line.get("message", {}).get("content", "")
+                                    tools_chunk = json_line.get("message", {}).get("tool_calls", []) 
+                                    yield (thinking_chunk, content_chunk, tools_chunk)
+                                except json.JSONDecodeError:
+                                    continue
+                    else:
+                        res_json = await response.json()
+                        thinking = res_json.get("message", {}).get("thinking", "")
+                        content = res_json.get("message", {}).get("content", "")
+                        tools = res_json.get("message", {}).get("tool_calls", [])
+                        yield (thinking, content, tools)
 
         except Exception as e:
             await log(f"Ollama API Request Error: {e}", "error")
             yield (None, f"\n[Error: {type(e).__name__}: {e}]", None)
+        finally:
+            self.state = "idle"
 
     async def shutdown(self):
         await log(f"Shutting down {self.name}...", "info")
 
-        url = f'{self.host}{self._get_endpoint()}'
+        self.state = "shutting down"
 
-        headers = {"Content-Type": "application/json"}
-        data = {
-            'model': self.ollama_name,
-            'keep_alive': 0
-        }
+        if self.session is not None:
+            try:
+                url = f'{self.host}{self._get_endpoint()}'
+                headers = {"Content-Type": "application/json"}
+                data = {
+                    'model': self.ollama_name,
+                    'keep_alive': 0
+                }
+                async with self.session.post(url, headers=headers, data=json.dumps(data)) as response:
+                    response.raise_for_status()
+                    if response.status == 200:
+                        await log(f"{self.name} acknowledged shutdown request.", "success")
+            except Exception as e:
+                await log(f"Error sending keep_alive: 0 to {self.name}: {e}", 'warn')
 
-        async with self.session.post(url, headers=headers, data=json.dumps(data)) as response:  # type: ignore
-            response.raise_for_status()
-            if response.status == 200:
-                await log(f"{self.name} acknowledged shutdown request.", "success")
+        if self.session is not None:
+            try:
+                url = f'{self.host}{self._get_endpoint()}'
+                headers = {"Content-Type": "application/json"}
+                data = {
+                    'model': self.ollama_name,
+                    'keep_alive': 0
+                }
+                async with self.session.post(url, headers=headers, data=json.dumps(data)) as response:
+                    response.raise_for_status()
+                    if response.status == 200:
+                        await log(f"{self.name} acknowledged shutdown request.", "success")
+            except Exception as e:
+                await log(f"Error sending keep_alive: 0 to {self.name}: {e}", 'warn')
 
         if self.session is not None:
             try:
@@ -379,22 +432,28 @@ class Model:
             except Exception as e:
                 await log(f"Error closing session for {self.name}: {e}", 'error')
             self.session = None
+
         if self.process is not None:
             try:
+                await log(f"Terminating Ollama server process for {self.name}...", "info")
                 self.process.terminate()
                 try:
-                    self.process.wait(timeout=5)
+                    await asyncio.to_thread(self.process.wait, timeout=10)
                 except subprocess.TimeoutExpired:
+                    await log(f"Process for {self.name} did not terminate gracefully, killing...", "warn")
                     self.process.kill()
-                    await asyncio.to_thread(self.process.wait, timeout=2)
+                    await asyncio.to_thread(self.process.wait, timeout=5)
+                await log(f"Ollama server process for {self.name} terminated.", "success")
             except Exception as e:
-                await log(f"Error terminating process for {self.name}: {e}", 'error')
+                await log(f"Error terminating Ollama server process for {self.name}: {e}", 'error')
             finally:
                 self.process = None
+
         if hasattr(self, '_log_file') and self._log_file is not None:
             try:
                 self._log_file.close()
             except Exception as e:
                 await log(f"Error closing log file for {self.name}: {e}", 'error')
             self._log_file = None
-        await log(f"{self.name} process terminated.", "success")
+
+        self.state = "down"
