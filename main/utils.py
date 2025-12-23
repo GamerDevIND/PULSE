@@ -93,20 +93,9 @@ async def schemaify(python_type: Any) -> dict: # Before you ask: yes, this is AI
 async def load_tools(*funcs):
     jsons = []
 
-    def py_type_to_json(python_type):
-        mapping = {
-            str: "string",
-            int: "integer",
-            float: "number",
-            bool: "boolean",
-            dict: "object",
-            list: "array",
-        }
-        return mapping.get(python_type, "string")
-
     for func in funcs:
         name = func.__name__
-        desc = inspect.getdoc(func) or ""
+        desc = inspect.getdoc(func) or "No description provided."
         sig = inspect.signature(func)
 
         properties = {}  
@@ -114,27 +103,24 @@ async def load_tools(*funcs):
 
         for arg_name, param in sig.parameters.items():
             annotation = param.annotation if param.annotation != inspect._empty else str
-            json_type = py_type_to_json(annotation)
+            properties[arg_name] = await schemaify(annotation)
 
-            properties[arg_name] = {
-                "type": json_type,
-                "description": f"{arg_name} parameter"
-            }
+            if "description" not in properties[arg_name]:
+                properties[arg_name]["description"] = f"The {arg_name} parameter."
 
             if param.default == inspect._empty:
                 required.append(arg_name)
-        jsons.append(
-            {
-                "type": "function",
-                "function": {
-                    "name": name,
-                    "description": desc,
-                    "parameters": {
-                        "type": "object",
-                        "required": required,
-                        "properties": properties
-                    }
+
+        jsons.append({
+            "type": "function",
+            "function": {
+                "name": name,
+                "description": desc,
+                "parameters": {
+                    "type": "object",
+                    "properties": properties,
+                    "required": required,
                 }
             }
-        )
+        })
     return jsons
