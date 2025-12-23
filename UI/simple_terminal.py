@@ -2,10 +2,14 @@ import asyncio
 import signal
 import sys
 import os
+import colorama
+
 sys.path.append(os.path.dirname(os.path.abspath(__file__)) + "/..")
 
 from main.AI import AI
 from main.utils import log
+
+colorama.init()
 
 async def main():
     ai = AI("main/Models_config_test.json")
@@ -14,13 +18,28 @@ async def main():
     loop = asyncio.get_running_loop()
     shutdown_event = asyncio.Event()
 
+    @ai.event_manager.on("generation_chunk")
+    async def handle_chunk(content_chunk, thinking_chunk, **kwargs):
+        if thinking_chunk:
+            print(f"{colorama.Fore.LIGHTBLACK_EX}{thinking_chunk}{colorama.Style.RESET_ALL}", end="", flush=True)
+        if content_chunk:
+            print(content_chunk, end="", flush=True)
+
+    @ai.event_manager.on("tool_executed")
+    async def handle_tool(tool_name, result, **kwargs):
+        pass
+
+    @ai.event_manager.on("save_context_completed")
+    async def handle_save(**kwargs):
+        pass
+
     async def shutdown():
         if not shutdown_event.is_set():
             shutdown_event.set()
+            print("\nShutting down AI services...")
             await ai.shut_down()
 
     def signal_handler():
-        print("\nReceived shutdown signal. Initiating graceful shutdown...")
         asyncio.create_task(shutdown())
 
     for sig in (signal.SIGINT, signal.SIGTERM):
@@ -31,7 +50,7 @@ async def main():
 
     while not shutdown_event.is_set():
         try:
-            req = await loop.run_in_executor(None, input, ">>> ")
+            req = input(">>> ")
         except (EOFError, KeyboardInterrupt):
             req = "/bye"
 
@@ -46,21 +65,22 @@ async def main():
             if len(parts) == 2:
                 image_path, req = map(str.strip, parts)
             else:
-                await log("No image path provided. Continuing with text only.", "warn")
-
-        if image_path and not any(m.has_vision for m in ai.models.values()):
-            await log("No vision models available. Skipping image input.", "warn")
-            image_path = None
+                await log("No image path. Continuing with text only.", "warn")
 
         try:
-            async for (_, res) in ai.generate(req, manual_routing=False, image_path=image_path):
-                print(res, end="", flush=True)
+            async for (thinking, response) in ai.generate(req, manual_routing=False, image_path=image_path):
+                pass # do whatever you want with the chunks 
+            
             print()
-            await log("Generation Completed", "success")
+            
         except Exception as e:
             await log(f"Main loop error: {e}", "error")
+            if not shutdown_event.is_set():
+                await shutdown()
             break
 
-
 if __name__ == "__main__":
-    asyncio.run(main())
+    try:
+        asyncio.run(main())
+    except KeyboardInterrupt:
+        pass
