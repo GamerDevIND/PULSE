@@ -1,4 +1,4 @@
-STREAM_DISABLED= ["discod", "cli-no-stream"]
+STREAM_DISABLED= ["discord", "cli-no-stream"]
 
 IMAGE_EXTs = ['.png', '.jpg', '.jpeg']
 VIDEO_EXTs =  ['.mp4', '.mov', '.avi']
