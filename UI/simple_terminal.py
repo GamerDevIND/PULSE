@@ -12,7 +12,7 @@ from main.utils import log
 colorama.init()
 
 async def main():
-    ai = AI("main/Models_config_test.json")
+    ai = AI("main/Models_config.json")
     await ai.init("cli")
 
     loop = asyncio.get_running_loop()
@@ -70,9 +70,9 @@ async def main():
         try:
             async for (thinking, response) in ai.generate(req, manual_routing=False, image_path=image_path):
                 pass # do whatever you want with the chunks 
-            
+
             print()
-            
+
         except Exception as e:
             await log(f"Main loop error: {e}", "error")
             if not shutdown_event.is_set():
