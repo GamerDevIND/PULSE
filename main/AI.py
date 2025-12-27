@@ -1,9 +1,8 @@
-
 import asyncio
 import aiofiles
 import aiohttp
 import json
-from .utils import log, load_tools
+from .utils import log, load_tools, Tool
 from .models import Model
 from .Events import Event_Manager
 from .configs import ( 
@@ -23,6 +22,7 @@ def on_event(event_name):
         func._event_trigger = event_name
         return func
     return decorator
+
 class AI:
     def __init__(self, model_config_path="main/Models_config.json", context_path="main/saves/context.json"):
         self.model_config_path = model_config_path
@@ -38,6 +38,7 @@ class AI:
         self.default_model = 'chat'
         self.load_models()
         self.running_tasks = set()
+        self.tools_regis = {}
         self.context_lock = asyncio.Lock()
 
     def load_models(self):
@@ -66,13 +67,20 @@ class AI:
                 self.event_manager.on(method._event_trigger)(method)
 
         await log("Warming up all models...", "info", append=False)
-        self.available_functions = [*tools]
-        self.available_tools = {str(t.__name__): t for t in self.available_functions}
+        available_tools = [*tools]
+
+        self.available_tools = {str(t.__name__): t for t in available_tools}
+
+        tool_defs = await load_tools(*(self.available_tools.values()))
+
+        for tool in tool_defs: 
+           if isinstance(tool, Tool):self.tools_regis[tool.name] = tool
 
         for model in self.models.values():
             if model.has_tools:
-                tool_defs = await load_tools(*self.available_functions)
                 await model.add_tools(*tool_defs)
+            if model.role == "router": model.add_to_avaliable_roles("chat", "cot")
+
             await model.warm_up()
         check_task = asyncio.create_task(self.check_models())
         self.running_tasks.add(check_task)
@@ -165,7 +173,7 @@ class AI:
                     continue
 
                 is_alive = await self._ping_model_tag(model.host)
-                
+
                 is_terminated = model.process.poll() is not None if model.process else True
 
                 if not is_alive:
@@ -175,7 +183,7 @@ class AI:
 
                 elif is_terminated:
                     model.state = "idle" 
-            
+
             await asyncio.sleep(interval)
 
     async def summarise_context(self, context = None, max_nums = 20, model_role = 'summarizer' , pair = False, save_context = True):
@@ -195,25 +203,25 @@ class AI:
 
                     if role != 'tool':
                         text += f"{role} : {content}\n"
-                
+
 
                 system = self.system_prompts.get('summarizer', 'This is a conversation log. Produce a factual, neutral summary.\n\
                                                        Do your only job properly: SUMMARIZE THE GIVEN CONVERSATION.  \
                                                        Do ****NOT**** try to be helpful and answer the given query, just summarise the given conversation.')
-                
+
                 summary = list(context[:max_nums])
 
                 entry = None
                 try:
                     async for (_, out, _ )in model.generate(text, [], stream=False, system_prompt_override=system):
                         if out != ERROR_TOKEN and (out and isinstance(out, str) and out.strip()):
-                            
+
                             entry = {
                                 'role': 'tool',
                                 'tool_name': 'summarizer',
                                 'content': out.strip()
                             }
-                            
+
                 except Exception as e:
                     await log(f"Error during summarization: {e}", "error")
                     summary = list(context[:max_nums])
@@ -330,15 +338,16 @@ class AI:
                 content_final += content_chunk or ""
                 if tools_called is None:
                     tools_called = []
-                    
+
                 if tools_chunk:
                     tools_called.extend(tools_chunk)
 
                 await self.event_manager.emit("generation_chunk", model_name=model_name, thinking_chunk=thinking_chunk, content_chunk=content_chunk)
 
                 yield (thinking_chunk or "", content_chunk or "")
-                    
+
         else:
+            await log(f"Non-streaming mode active", "info")
             async for (thinking, content, tools) in model.generate(query, context, False, think=think, image_path=image_path):
                 await log(f"Got non-streaming response chunk", "info")
                 if content == ERROR_TOKEN:
@@ -352,17 +361,18 @@ class AI:
 
         await self.event_manager.emit("generation_completed", model_name=model_name, query=query, final_thinking=thinking_final, final_content=content_final, tools_called=tools_called)       
         async with self.context_lock:
-            self.context.extend([
-            {'role': 'user', 'content': query},
-            {'role': 'assistant', 'thinking': thinking_final, 'content': content_final, 'tool_calls': tools_called}
-            ])
+            if query and query.strip(): 
+                self.context.append({'role': 'user', 'content': query})
+
+            self.context.append({'role': 'assistant', 'thinking': thinking_final, 'content': content_final, 'tool_calls': tools_called})
 
         await self.event_manager.emit("execute_tools_requested", tools=tools_called)
 
-        await self.event_manager.emit_and_wait("save_context_requested")
+        self.event_manager.emit_and_wait("save_context_requested")
 
     async def execute_tools(self, tools):
         results = {}
+        type_ = 'silent'
         if not tools:
             return results
 
@@ -379,23 +389,29 @@ class AI:
                 await log(f"Tool '{tool_name}' not available. Available tools: {list(self.available_tools.keys())}", "warn")
                 results[tool_name] = f"Tool '{tool_name}' not found"
                 continue
+            tool_obj = self.tools_regis.get(tool_name)
+            if tool_obj is None:
+                try:
+                    results[tool_name] = await self.available_tools[tool_name](**tool_args)
 
-            try:
-                results[tool_name] = await self.available_tools[tool_name](**tool_args)
+                    await self.event_manager.emit("tool_executed", tool = tool_obj)
 
-                await self.event_manager.emit("tool_executed", tool_name=tool_name, tool_args=tool_args, result=results[tool_name])
-
-                await log(f"Tool '{tool_name}' executed successfully.", "success")
-            except Exception as e:
-                await log(f"Error executing tool '{tool_name}': {e}", "error")
-                results[tool_name] = f"Error executing tool '{tool_name}': {e}"
+                    await log(f"Tool '{tool_name}' executed successfully.", "success")
+                except Exception as e:
+                    await log(f"Error executing tool '{tool_name}': {e}", "error")
+                    results[tool_name] = f"Error executing tool '{tool_name}': {e}"
+            elif tool_obj is not None and isinstance(tool_obj, Tool):
+                results[tool_name] = await tool_obj.execute(**tool_args)
+            else:
+                await log(f"Something terrible happened while executing tool: {tool_name}", 'error')
+                continue
 
             async with self.context_lock:
                     self.context.append(
                     {'role':'tool', 'tool_name':tool_name, 'content':str(results[tool_name])}
                     )
-
-        await self.event_manager.emit_and_wait("save_context_requested", results=results)
+            if tool_obj is not None: await self.event_manager.emit("tool_executed", tool = tool_obj)
+              self.event_manager.emit_and_wait("save_context_requested")
         return results
 
     async def shut_down(self):
