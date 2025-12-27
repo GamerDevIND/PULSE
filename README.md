@@ -4,7 +4,7 @@ Personal Unified Logic System Entity
 
 # WHAT THE FUCK ON EARTH IS THIS PIECE OF SHIT?:
 
-PULSE a.k.a. Personal Unified Logic System Entity is a replication of JARVIS (just realised this implementation is closer to FRIDAY but I'll stick with JARVIS, bear with me) from Iron Man (MCU), but instead of arc reactor it runs on:
+PULSE a.k.a. Personal Unified Logic System Entity is a replication of JARVIS (I just realised this implementation is closer to FRIDAY but I'll stick with JARVIS, bear with me) from Iron Man (MCU), but instead of arc reactor it runs on:
 
 - Coffee
 
