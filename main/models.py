@@ -5,7 +5,7 @@ import subprocess
 import aiohttp
 import aiofiles
 import av
-from .utils import log
+from .utils import log, Tool
 from .configs import ERROR_TOKEN, VIDEO_EXTs, IMAGE_EXTs
 import base64
 from io import BytesIO
@@ -31,6 +31,7 @@ class Model:
         self.custom_keep_alive_timeout = "5m"
         self.use_mmap = False
         self.has_video = False
+        self.avaliable_roles = [] # ONLY accessed by the router model
         self.tools = []
         self.state = "idle"
         self.lock = asyncio.Lock()
@@ -103,6 +104,11 @@ class Model:
             return base64_image, None
         except Exception as e:
             return ERROR_TOKEN, e
+
+    def add_to_avaliable_roles(self, *roles):
+        roles = list(roles)
+        self.avaliable_roles.extend(roles)
+        self.avaliable_roles = list(set(self.avaliable_roles)) # order doesn't matter 
 
     async def warm_up(self, use_mmap=False, warmup_image_path="main/test.jpg", use_custom_keep_alive_timeout=False, custom_keep_alive_timeout: str = "5m", has_video_processing=False, warmup_video_path="main/test.mp4"):
         self.use_custom_keep_alive_timeout = use_custom_keep_alive_timeout
@@ -207,16 +213,19 @@ class Model:
             options["keep_alive"] = self.custom_keep_alive_timeout
 
         if self.role.lower() == 'router':
+            if len(self.avaliable_roles) < 1:
+               await log("No role provided", "error") 
+               raise  Exception("No role provided")
             data["format"] = {
                 "type": "object",
                 "properties": {
-                    "role": {"type": "string", "enum": ["chat", "cot"], "description": "Selected role or model"}
-                },
+                    "role": {"type": "string", "enum": self.avaliable_roles, "description": "Selected role or model"}
+                }, # I'll add more
                 "required": ["role"]
             }
 
         if self.has_vision:
-            if self.has_video:
+            if self.has_video and os.path.exists(warmup_video_path):
                 await log("Warming up with video frame extraction...", 'info')
                 encoded_frames, e = await self._encode_frames_from_vid(warmup_video_path, mod_=10)
                 if encoded_frames == ERROR_TOKEN:
@@ -235,7 +244,7 @@ class Model:
                     if "messages" in data:
                         data['messages'][-1]['images'] = [encoded_image]
             else:
-                await log("Vision model, but no video processing enabled and no warmup image found. Skipping vision test.", 'warn')
+                await log("Vision model, but no video processing enabled and no warmup image / video found. Skipping vision test.", 'warn')
 
         data["options"] = options
 
@@ -247,13 +256,13 @@ class Model:
                 if not ("message" in res_json and "content" in res_json["message"]):
                     raise ValueError("Unexpected API response format during non-streaming test.")
         except (aiohttp.ClientError, ValueError, Exception) as e:
-            await log(f"🟥 Non-streaming test failed for {self.name}: {e}", "error")
+            await log(f"Non-streaming test failed for {self.name}: {e}", "error")
             if self.session is not None:
                 await self.session.close()
                 self.session = None
             return
 
-        await log(f'🟩 Non-Streaming works. Trying Streaming...', "success")
+        await log(f'Non-Streaming works. Trying Streaming...', "success")
 
         data["stream"] = True
 
@@ -280,8 +289,12 @@ class Model:
         await log(f"{self.name} ({self.ollama_name}) warmed up!", "success")
         self.state = "idle"
 
-    async def add_tools(self, *tool_dict):
-        self.tools.extend(tool_dict)
+    async def add_tools(self, *tool_dicts):
+        for tool in tool_dicts:
+            if isinstance(tool, Tool):
+                self.tools.append(tool.schema)
+            else:
+                self.tools.append(tool)
 
     async def generate(self, query: str, context: list[dict], stream: bool, think: str | bool | None = False, image_path: None | str = None, 
                        mod_ = 1, system_prompt_override: str | None = None):
@@ -311,11 +324,16 @@ class Model:
         }
 
         if self.role.lower() == 'router':
+            if len(self.avaliable_roles) < 1:
+               await log("No role provided", "error") 
+               raise  Exception("No role provided")
+
+
             data["format"] = {
                 "type": "object",
                 "properties": {
-                    "role": {"type": "string", "enum": ["chat", "cot"], "description": "Selected role or model"}
-                },
+                    "role": {"type": "string", "enum": self.avaliable_roles, "description": "Selected role or model"}
+                }, # I'll add more
                 "required": ["role"]
             }
         elif self.has_tools:
@@ -340,7 +358,7 @@ class Model:
                 image, e = await self._encode_image(image_path)
                 if image == ERROR_TOKEN:
                     await log(f"Error encoding image!: {repr(e)}", 'error')
-                    yield (None, f"Error encoding image!: {repr(e)}", None)
+                    yield (None, ERROR_TOKEN, None)
                     return
                 else:
                     data['messages'][-1]['images'] = [image]
@@ -348,7 +366,7 @@ class Model:
                 frames, e = await self._encode_frames_from_vid(image_path, mod_)
                 if frames == ERROR_TOKEN:
                     await log(f"Error encoding video!: {repr(e)}", 'error')
-                    yield (None, f"Error encoding video!: {repr(e)}", None)
+                    yield (None, ERROR_TOKEN, None)
                     return
                 else:
                     data['messages'][-1]['images'] = frames
@@ -387,7 +405,7 @@ class Model:
 
         except Exception as e:
             await log(f"Ollama API Request Error: {e}", "error")
-            yield (None, f"\n[Error: {type(e).__name__}: {e}]", None)
+            yield (None, ERROR_TOKEN, None)
         finally:
             self.state = "idle"
 
