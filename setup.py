@@ -24,18 +24,18 @@ async def setup():
         else:
             print("Please download Ollama for your OS: https://ollama.com/download")
             return
-        
+
     config_path = Path("main/Models_config.json")
     if config_path.exists():
         download = input(f"Found {config_path}. Download models now? (y/n): ").lower() == 'y'
         if download:
             with open(config_path) as f:
                 models = json.load(f)
-            
+
 
             serve_proc = subprocess.Popen(["ollama", "serve"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
             time.sleep(3)
-            
+
             try:
                 for model in models:
                     name = model.get("ollama_name")
