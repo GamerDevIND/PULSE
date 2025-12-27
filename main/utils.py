@@ -4,7 +4,7 @@ import aiofiles
 import inspect
 from typing import Any, get_origin, get_args, Union, List, Dict, Literal
 
-async def log(message: str, level, append = True):
+async def log(message: str, level, append = True, stdout = True):
     log_dir = os.path.join( "main", "logs")
     os.makedirs(log_dir, exist_ok=True)
     timestamp = datetime.now().strftime(" %H:%M:%S - %d / %m  / %Y ")
@@ -17,7 +17,7 @@ async def log(message: str, level, append = True):
     text = f"{emoji} [{level}] {message} - [{timestamp}]\n"
     log_file = os.path.join(log_dir, 'log.log')
     async with aiofiles.open(log_file, "w" if not  append else "a") as f:
-        print(text)
+        if stdout: print(text)
         await f.write(text)
 
 
@@ -38,7 +38,7 @@ async def schemaify(python_type: Any) -> dict: # Before you ask: yes, this is AI
 
     elif origin is Literal:  
         return {"enum": list(get_args(python_type))}  
-    
+
     elif origin is Union:  
         args = get_args(python_type)  
         if len(args) == 2 and type(None) in args:   
@@ -46,7 +46,7 @@ async def schemaify(python_type: Any) -> dict: # Before you ask: yes, this is AI
             return await schemaify(non_none_type)  
         else:  
             return {"anyOf": [await schemaify(arg) for arg in args]}  
-    
+
     elif origin in (list, List):  
         args = get_args(python_type)  
         if args:  
@@ -56,7 +56,7 @@ async def schemaify(python_type: Any) -> dict: # Before you ask: yes, this is AI
             }  
         else:  
             return {"type": "array"}
-   
+
     elif origin in (dict, Dict):  
         args = get_args(python_type)  
         if len(args) == 2:  
@@ -66,7 +66,7 @@ async def schemaify(python_type: Any) -> dict: # Before you ask: yes, this is AI
             }  
         else:  
             return {"type": "object"}
-    
+
     elif origin is tuple:  
         args = get_args(python_type)  
         if len(args) == 1:  
@@ -82,15 +82,13 @@ async def schemaify(python_type: Any) -> dict: # Before you ask: yes, this is AI
             }  
         else:  
             return {"type": "array"}  
-    
+
     elif inspect.isclass(python_type):  
         return {"type": "object"}  
     else:
         return {"type": "string"}
 
-
-
-async def load_tools(*funcs):
+async def convert_funcs(*funcs):
     jsons = []
 
     for func in funcs:
@@ -124,3 +122,37 @@ async def load_tools(*funcs):
             }
         })
     return jsons
+
+async def load_tools(tools_type_iterable):
+    tools = []
+    for tool, type_ in tools_type_iterable:
+        tool_created = await Tool.create(tool, type_)
+        tools.append(tool_created)
+
+    return tools
+
+class Tool:
+    def __init__(self, func, type_):
+        self.func = func
+        self.name = self.func.__name__
+        self.type = type_
+        self.schema = None
+
+    @classmethod
+    async def create(cls, func, type_):
+        instance = cls(func, type_)
+        instance.schema = (await convert_funcs(instance.func))[0]
+        return instance
+
+    async def execute(self, **args):
+        try:
+            if inspect.iscoroutinefunction(self.func):
+                result = await self.func(**args)
+            else:
+                result = self.func(**args)
+        except Exception as e:
+            result = f"An Error occurred while calling {self.name}: {str(e)}"
+
+            await log(f"An Error occurred while calling {self.name}: {str(e)}", 'error')
+
+        return result
