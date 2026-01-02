@@ -81,7 +81,7 @@ class AI:
         for model in self.models.values():
             if model.has_tools:
                 await model.add_tools(*tool_defs)
-            if model.role == "router": model.add_to_avaliable_roles("chat", "cot")
+            if model.role == "router": model.add_to_available_roles("chat", "cot")
                 
             await model.warm_up()
         check_task = asyncio.create_task(self.check_models())
