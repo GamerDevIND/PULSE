@@ -267,6 +267,7 @@ class Model:
         async with self.lock:
             if self.state != IDLE:
                 await log(f"{self.name} is busy", "warn")
+                yield (None, ERROR_TOKEN, None)
                 return
             self.state = BUSY
 
