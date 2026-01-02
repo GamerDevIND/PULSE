@@ -40,6 +40,8 @@ class AI:
         self.running_tasks = set()
         self.tools_regis = {}
         self.context_lock = asyncio.Lock()
+        self.summary: str | None = None
+        self.context = []
 
     def load_models(self):
         try:
@@ -52,10 +54,10 @@ class AI:
                         self.models[role] = Model(**model_data)
         except (FileNotFoundError, json.JSONDecodeError) as e:
             print(f"🟥 Error loading models: {e}")
-            exit(1)
+            raise Exception("死ね")
 
     async def init(self, platform: str, tools:list=[], max_summarize_nums=20, 
-                summarize_model_role='chat', summary_pair=False):
+                summarize_model_role='chat'):
         self.context = await self.load_context()
         self.platform = platform
         self.event_manager = Event_Manager()
@@ -85,16 +87,7 @@ class AI:
         check_task = asyncio.create_task(self.check_models())
         self.running_tasks.add(check_task)
 
-        summarizer_task = asyncio.create_task(self.summarise_context(
-            max_nums=max_summarize_nums,
-            model_role=summarize_model_role,
-            pair=summary_pair,
-            save_context=True
-        ))
-        self.running_tasks.add(summarizer_task)
-
         check_task.add_done_callback(lambda t: self.running_tasks.discard(t))
-        summarizer_task.add_done_callback(lambda t: self.running_tasks.discard(t))
 
     @on_event("save_context_requested")
     async def _handle_save_event(self, **kwargs):
@@ -103,28 +96,31 @@ class AI:
     @on_event("execute_tools_requested")
     async def _handle_tool_event(self, tools, **kwargs):
         if tools:
-            asyncio.create_task(self.execute_tools(tools))
+            await self.execute_tools(tools)
 
     async def load_context(self):
         try:
             async with aiofiles.open(self.context_path) as file:
                 content = await file.read()
-                return json.loads(content)
+                content = json.loads(content)
+                self.summary = content.get("summary")
+                return content.get("conversation",[])
         except (FileNotFoundError, json.JSONDecodeError):
             return []
 
     async def save_context(self):
-        await self.event_manager.emit("save_context_started")
+        await self.event_manager.emit_async("save_context_started")
         try:
             async with self.context_lock:
-                data_to_save = json.dumps(self.context, indent=2)
+                data = {"summary":self.summary, "conversation": self.context}
+                data_to_save = json.dumps(data, indent=2) 
 
             async with aiofiles.open(self.context_path, "w") as file:
                 await file.write(data_to_save)
-                await self.event_manager.emit("save_context_completed")
+                await self.event_manager.emit_async("save_context_completed")
         except IOError as e:
             await log(f"Error saving context: {e}", "error")
-            await self.event_manager.emit("save_context_failed", error=str(e))
+            await self.event_manager.emit_async("save_context_failed", error=str(e))
 
     async def _test_model(self, url, ollama_name ):
         try:
@@ -186,56 +182,51 @@ class AI:
 
             await asyncio.sleep(interval)
 
-    async def summarise_context(self, context = None, max_nums = 20, model_role = 'summarizer' , pair = False, save_context = True):
-        if context is None:
-            async with self.context_lock:
-                context = list(self.context)
 
-        model = self.models.get(model_role)
-        if model:
-            threshold = ((len(context) // 2) if pair else len(context))
-            if threshold >= max_nums:
-                given_context = list(context[:max_nums])
-                text = '\n'
-                for t in given_context:
-                    role = t['role']
-                    content = t['content']
+    async def summarise_context(self, context = None, max_nums = 20, model_role = 'summarizer', keep_nums = 10, save_context = False):  
+        if context is None:  
+            async with self.context_lock:  
+                context = list(self.context)  
 
-                    if role != 'tool':
-                        text += f"{role} : {content}\n"
+        model = self.models.get(model_role)  
+        if model:  
 
+            if len(context) >= max_nums:  
+                given_context = list(context[:max_nums-keep_nums])  
+                text = '\n'  
+                for t in given_context:  
+                    role = t['role']  
+                    content = t['content']  
 
-                system = self.system_prompts.get('summarizer', 'This is a conversation log. Produce a factual, neutral summary.\n\
-                                                       Do your only job properly: SUMMARIZE THE GIVEN CONVERSATION.  \
-                                                       Do ****NOT**** try to be helpful and answer the given query, just summarise the given conversation.')
+                    if role != 'tool':  
+                        text += f"{role} : {content}\n"  
 
-                summary = list(context[:max_nums])
+                text = f"(user/assistant messages below are the ONLY new information)\nOutput ONLY the updated summary text. No commentary.\n<NEW_CONVERSATION> \n{text}\n </NEW_CONVERSATION>"  
+                system = self.system_prompts.get('summarizer', 'This is a conversation log. Produce a factual, neutral summary.\n' \  
+                                                       'Do your only job properly: SUMMARIZE THE GIVEN CONVERSATION.'  \  
+                                                       "Do ****NOT**** try to be helpful and answer the given query, just summarise the given conversation. Output ONLY the updated summary text. No commentary.')"  
 
-                entry = None
-                try:
-                    async for (_, out, _ )in model.generate(text, [], stream=False, system_prompt_override=system):
-                        if out != ERROR_TOKEN and (out and isinstance(out, str) and out.strip()):
+                if self.summary: text = f"Below is the previous rolling summary of the conversation.\nIt represents persisted memory.\nUpdate it ONLY if the new conversation content adds facts or contradicts it.\nIf nothing changes, reproduce it verbatim.\n\n<PREVIOUS_SUMMARY>\n{self.summary}\n</PREVIOUS_SUMMARY>" + text  
 
-                            entry = {
-                                'role': 'tool',
-                                'tool_name': 'summarizer',
-                                'content': out.strip()
-                            }
+                entry = None  
+                try:  
+                    async for (_, out, _ )in model.generate(text, [], stream=False, system_prompt_override=system):  
+                        if out != ERROR_TOKEN and (out and isinstance(out, str) and out.strip()):  
 
-                except Exception as e:
-                    await log(f"Error during summarization: {e}", "error")
-                    summary = list(context[:max_nums])
-                if entry:
-                    context[:max_nums] = [entry]
-                else:
-                    context[:max_nums] = summary
+                            entry = out
 
-                if save_context:
-                    async with self.context_lock:
-                        self.context = context
-                        await self.event_manager.emit("save_context_requested")
+                except Exception as e:  
+                    await log(f"Error during summarization: {e}", "error")  
 
-                # TODO: Trim the context to remove older entries if needed explicitly
+                if entry: 
+                    self.summary = entry  
+                    context = context[-keep_nums:]  
+                if save_context:  
+                    async with self.context_lock:  
+                        self.context = context  
+                        await self.event_manager.emit_async("save_context_requested")  
+
+                # TODO: Trim the context to remove older entries if needed explicitly  
 
                 return context
 
@@ -265,40 +256,40 @@ class AI:
             try:
                 router_resp = json.loads(router_resp_raw)
                 if isinstance(router_resp, dict):
-                    selected_role = router_resp.get("model", router_resp.get("role", "")).strip().lower()
+                    selected_role = router_resp.get("role", "").strip().lower()
             except json.JSONDecodeError:
                 selected_role = router_resp_raw.lower().strip()
 
             if selected_role in self.models:
                 await log(f"Router selected model '{selected_role}'.", "info")
-                await self.event_manager.emit("router_selected", query=query, selected_role=selected_role)
+                await self.event_manager.emit_async("router_selected", query=query, selected_role=selected_role)
                 return query, selected_role
             else:
                 await log(f"Router selected unknown role or failed to parse ('{selected_role}'). Using default '{self.default_model}'.", "warn")
-                await self.event_manager.emit("router_selected", query=query, selected_role=self.default_model)
+                await self.event_manager.emit_async("router_selected", query=query, selected_role=self.default_model)
                 return query, self.default_model
         else:
             if query.startswith("!chat"):
                 query = query.removeprefix("!chat").strip()
                 self.models['chat'].system = CHAT_PROMPT
-                await self.event_manager.emit("router_selected", query=query, selected_role="chat")
+                await self.event_manager.emit_async("router_selected", query=query, selected_role="chat")
                 return query, "chat"
             elif query.startswith("!cot"):
                 query = query.removeprefix("!cot").strip()
-                await self.event_manager.emit("router_selected", query=query, selected_role="cot")
+                await self.event_manager.emit_async("router_selected", query=query, selected_role="cot")
                 return query, "cot"
             elif query.startswith("!chaos"):
                 query = query.removeprefix("!chaos").strip()
                 self.models['chat'].system = CHAOS_PROMPT
-                await self.event_manager.emit("router_selected", query=query, selected_role="chat")
+                await self.event_manager.emit_async("router_selected", query=query, selected_role="chat")
                 return query, "chat"
             elif query.startswith("!vision"):
                 query = query.removeprefix("!vision").strip()
-                await self.event_manager.emit("router_selected", query=query, selected_role="vision")
+                await self.event_manager.emit_async("router_selected", query=query, selected_role="vision")
                 return query, "vision"
             else:
                 await log(f"No or incorrect prefix, using default '{self.default_model}'", "info")
-                await self.event_manager.emit("router_selected", query=query, selected_role=self.default_model)
+                await self.event_manager.emit_async("router_selected", query=query, selected_role=self.default_model)
                 return query, self.default_model
 
     async def generate(self, query, stream: None | bool = None, manual_routing=False, think=None, image_path=None):
@@ -317,7 +308,10 @@ class AI:
         async with self.context_lock:
             context = list(self.context)
 
-        await self.event_manager.emit("generation_started", model_name=model_name, query=query)
+        if self.summary: context.insert(0, {"role": "assistant", "content": f"[PERSISTED MEMORY – NOT DIALOGUE]\n[INTERNAL MEMORY — DO NOT REPEAT — NOT PART OF CONVERSATION]\nThe system generated summary of previous messages/turns. **Do NOT** treat this as the part of the conversation. For reference only. \n<SUMMARY>\n{self.summary}\n</SUMMARY>"}) # role:system is fatal.
+
+        await self.event_manager.emit_async("generation_started", model_name=model_name, query=query)
+
 
         if stream:
             queue = asyncio.Queue()
@@ -328,7 +322,8 @@ class AI:
                     await queue.put((thinking_chunk, content_chunk, tools_chunk))
                 await queue.put(None)
 
-            asyncio.create_task(producer())
+            task = asyncio.create_task(producer())
+
             while True:
                 item = await queue.get()
                 if item is None:
@@ -342,10 +337,11 @@ class AI:
                 if tools_chunk:
                     tools_called.extend(tools_chunk)
 
-                await self.event_manager.emit("generation_chunk", model_name=model_name, thinking_chunk=thinking_chunk, content_chunk=content_chunk)
+                await self.event_manager.emit_async("generation_chunk", model_name=model_name, thinking_chunk=thinking_chunk, content_chunk=content_chunk)
 
                 yield (thinking_chunk or "", content_chunk or "")
 
+            await task            
         else:
             await log(f"Non-streaming mode active", "info")
             async for (thinking, content, tools) in model.generate(query, context, False, think=think, image_path=image_path):
@@ -356,19 +352,21 @@ class AI:
                 thinking_final = thinking or ""
                 content_final = content or ""
                 tools_called = tools
-                await self.event_manager.emit("generation_chunk", model_name=model_name, thinking_chunk=thinking, content_chunk=content)
+                await self.event_manager.emit_async("generation_chunk", model_name=model_name, thinking_chunk=thinking, content_chunk=content)
                 yield (thinking_final, content_final)
 
-        await self.event_manager.emit("generation_completed", model_name=model_name, query=query, final_thinking=thinking_final, final_content=content_final, tools_called=tools_called)       
+        await self.event_manager.emit_async("generation_completed", model_name=model_name, query=query, final_thinking=thinking_final, final_content=content_final, tools_called=tools_called)
+        context = await self.summarise_context(save_context = False)       
         async with self.context_lock:
+            if context: self.context = context
             if query and query.strip(): 
                 self.context.append({'role': 'user', 'content': query})
 
             self.context.append({'role': 'assistant', 'thinking': thinking_final, 'content': content_final, 'tool_calls': tools_called})
 
-        await self.event_manager.emit("execute_tools_requested", tools=tools_called)
+        await self.event_manager.emit_async("execute_tools_requested", tools=tools_called) # too lazy to update self.context here.
 
-        self.event_manager.emit_and_wait("save_context_requested")
+        await self.event_manager.emit_async_block("save_context_requested") # just extra safe. 
 
     async def execute_tools(self, tools):
         results = {}
@@ -394,7 +392,7 @@ class AI:
                 try:
                     results[tool_name] = await self.available_tools[tool_name](**tool_args)
 
-                    await self.event_manager.emit("tool_executed", tool = tool_obj)
+                    await self.event_manager.emit_async("tool_executed", tool = tool_obj)
 
                     await log(f"Tool '{tool_name}' executed successfully.", "success")
                 except Exception as e:
@@ -410,15 +408,22 @@ class AI:
                     self.context.append(
                     {'role':'tool', 'tool_name':tool_name, 'content':str(results[tool_name])}
                     )
-            if tool_obj is not None: await self.event_manager.emit("tool_executed", tool = tool_obj)
-              self.event_manager.emit_and_wait("save_context_requested")
+            if tool_obj is not None: 
+                await self.event_manager.emit_async("tool_executed", tool = tool_obj)
+            await self.event_manager.emit_async_block("save_context_requested")
         return results
 
     async def shut_down(self):
         await log("Shutting Down all services...", "info")
         await self.event_manager.stop_event()
+
         for task in self.running_tasks:
             task.cancel()
+            try:
+                await task
+            except asyncio.CancelledError:
+                pass
+
         for model in self.models.values():
             await model.shutdown()
 
