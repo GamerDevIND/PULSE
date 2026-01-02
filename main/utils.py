@@ -38,7 +38,7 @@ async def schemaify(python_type: Any) -> dict: # Before you ask: yes, this is AI
 
     elif origin is Literal:  
         return {"enum": list(get_args(python_type))}  
-
+    
     elif origin is Union:  
         args = get_args(python_type)  
         if len(args) == 2 and type(None) in args:   
@@ -46,7 +46,7 @@ async def schemaify(python_type: Any) -> dict: # Before you ask: yes, this is AI
             return await schemaify(non_none_type)  
         else:  
             return {"anyOf": [await schemaify(arg) for arg in args]}  
-
+    
     elif origin in (list, List):  
         args = get_args(python_type)  
         if args:  
@@ -56,7 +56,7 @@ async def schemaify(python_type: Any) -> dict: # Before you ask: yes, this is AI
             }  
         else:  
             return {"type": "array"}
-
+   
     elif origin in (dict, Dict):  
         args = get_args(python_type)  
         if len(args) == 2:  
@@ -66,7 +66,7 @@ async def schemaify(python_type: Any) -> dict: # Before you ask: yes, this is AI
             }  
         else:  
             return {"type": "object"}
-
+    
     elif origin is tuple:  
         args = get_args(python_type)  
         if len(args) == 1:  
@@ -82,7 +82,7 @@ async def schemaify(python_type: Any) -> dict: # Before you ask: yes, this is AI
             }  
         else:  
             return {"type": "array"}  
-
+    
     elif inspect.isclass(python_type):  
         return {"type": "object"}  
     else:
@@ -123,14 +123,14 @@ async def convert_funcs(*funcs):
         })
     return jsons
 
-async def load_tools(tools_type_iterable):
+async def load_tools(*tools_type_iterable):
     tools = []
     for tool, type_ in tools_type_iterable:
         tool_created = await Tool.create(tool, type_)
         tools.append(tool_created)
 
     return tools
-
+    
 class Tool:
     def __init__(self, func, type_):
         self.func = func
