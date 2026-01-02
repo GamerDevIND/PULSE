@@ -6,6 +6,8 @@ class Event_Manager:
         self._events = {}
         self.queue = asyncio.Queue()
         self.current_task = None
+        self._tasks = set()
+        self._lock = asyncio.Lock()
 
     def on(self, event_name):
         def decorator(func):
@@ -13,10 +15,10 @@ class Event_Manager:
             return func
         return decorator
 
-    async def emit(self, event_name, *args, **kwargs):
+    async def emit_async(self, event_name, *args, **kwargs):
         await self.queue.put((event_name, args, kwargs))
 
-    async def emit_and_wait(self, event_name, *args, **kwargs):
+    async def emit_async_block(self, event_name, *args, **kwargs):
         callbacks = self._events.get(event_name)
         if not callbacks:
             return  # deterministic no-op
@@ -25,13 +27,19 @@ class Event_Manager:
         for callback in callbacks:
             try:
                 if asyncio.iscoroutinefunction(callback):
-                    tasks.append(asyncio.create_task(
+                    task = asyncio.create_task(
                         self._safe_call(callback, event_name, *args, **kwargs)
-                    ))
+                    )
+                    self._tasks.add(task)
+                    task.add_done_callback(self._tasks.discard)
+                    tasks.append(task)
                 else:
                     callback(*args, **kwargs)
             except Exception as e:
-                await log(f"Error in event '{event_name}': {e}", "error")
+                await log(
+                    f"Error in event '{event_name}' ({getattr(callback, '__name__', 'unknown')}): {e}",
+                    "error"
+                )
 
         if tasks:
             await asyncio.gather(*tasks)
@@ -40,29 +48,32 @@ class Event_Manager:
         try:
             await callback(*args, **kwargs)
         except Exception as e:
-            await log(f"Async error in event '{event_name}': {e}", "error")
+            await log(
+                f"Async error in event '{event_name}' ({getattr(callback, '__name__', 'unknown')}): {e}",
+                "error"
+            )
 
     async def process(self):
         try:
             while True:
-                item = await self.queue.get()
-                if item is None:
-                    self.queue.task_done()
-                    break
-
-                event_name, args, kwargs = item
+                event_name, args, kwargs = await self.queue.get()
                 callbacks = self._events.get(event_name, [])
 
                 for callback in callbacks:
                     if asyncio.iscoroutinefunction(callback):
-                        asyncio.create_task(
+                        task = asyncio.create_task(
                             self._safe_call(callback, event_name, *args, **kwargs)
                         )
+                        self._tasks.add(task)
+                        task.add_done_callback(self._tasks.discard)
                     else:
                         try:
                             callback(*args, **kwargs)
                         except Exception as e:
-                            await log(f"Error in event '{event_name}': {e}", "error")
+                            await log(
+                                f"Error in event '{event_name}' ({getattr(callback, '__name__', 'unknown')}): {e}",
+                                "error"
+                            )
 
                 self.queue.task_done()
 
@@ -72,16 +83,24 @@ class Event_Manager:
             await log(f"Event loop crashed: {e}", "critical")
 
     async def start_event(self):
-        if self.current_task is None or self.current_task.done():
-            self.current_task = asyncio.create_task(self.process())
-            await log("Event manager started.", "info")
+        async with self._lock:
+            if self.current_task is None or self.current_task.done():
+                self.current_task = asyncio.create_task(self.process())
+                await log("Event manager started.", "info")
 
     async def stop_event(self):
-        if self.current_task and not self.current_task.done():
-            self.current_task.cancel()
-            try:
-                await self.current_task
-            except asyncio.CancelledError:
-                pass
-            self.current_task = None
+        async with self._lock:
+            if self.current_task and not self.current_task.done():
+                self.current_task.cancel()
+                try:
+                    await self.current_task
+                except asyncio.CancelledError:
+                    pass
+                self.current_task = None
+
+            # cancel outstanding callback tasks
+            for task in list(self._tasks):
+                task.cancel()
+            self._tasks.clear()
+
             await log("Event manager stopped.", "info")
