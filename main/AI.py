@@ -417,7 +417,7 @@ class AI:
         await log("Shutting Down all services...", "info")
         await self.event_manager.stop_event()
         
-        for task in self.running_tasks:
+        for task in list(self.running_tasks):
             task.cancel()
             try:
                 await task
