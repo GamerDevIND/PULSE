@@ -22,7 +22,7 @@ def on_event(event_name):
         func._event_trigger = event_name
         return func
     return decorator
-
+    
 class AI:
     def __init__(self, model_config_path="main/Models_config.json", context_path="main/saves/context.json"):
         self.model_config_path = model_config_path
@@ -70,7 +70,7 @@ class AI:
 
         await log("Warming up all models...", "info", append=False)
         available_tools = [*tools]
-
+        
         self.available_tools = {str(t.__name__): t for t in available_tools}
 
         tool_defs = await load_tools(*(self.available_tools.values()))
@@ -82,7 +82,7 @@ class AI:
             if model.has_tools:
                 await model.add_tools(*tool_defs)
             if model.role == "router": model.add_to_avaliable_roles("chat", "cot")
-
+                
             await model.warm_up()
         check_task = asyncio.create_task(self.check_models())
         self.running_tasks.add(check_task)
@@ -169,7 +169,7 @@ class AI:
                     continue
 
                 is_alive = await self._ping_model_tag(model.host)
-
+                
                 is_terminated = model.process.poll() is not None if model.process else True
 
                 if not is_alive:
@@ -179,45 +179,45 @@ class AI:
 
                 elif is_terminated:
                     model.state = "idle" 
-
+            
             await asyncio.sleep(interval)
-
+          
 
     async def summarise_context(self, context = None, max_nums = 20, model_role = 'summarizer', keep_nums = 10, save_context = False):  
         if context is None:  
             async with self.context_lock:  
                 context = list(self.context)  
-
+  
         model = self.models.get(model_role)  
         if model:  
-
+            
             if len(context) >= max_nums:  
                 given_context = list(context[:max_nums-keep_nums])  
                 text = '\n'  
                 for t in given_context:  
                     role = t['role']  
                     content = t['content']  
-
+  
                     if role != 'tool':  
                         text += f"{role} : {content}\n"  
-
+  
                 text = f"(user/assistant messages below are the ONLY new information)\nOutput ONLY the updated summary text. No commentary.\n<NEW_CONVERSATION> \n{text}\n </NEW_CONVERSATION>"  
-                system = self.system_prompts.get('summarizer', 'This is a conversation log. Produce a factual, neutral summary.\n' \  
-                                                       'Do your only job properly: SUMMARIZE THE GIVEN CONVERSATION.'  \  
-                                                       "Do ****NOT**** try to be helpful and answer the given query, just summarise the given conversation. Output ONLY the updated summary text. No commentary.')"  
-
+                system = self.system_prompts.get('summarizer', f'''This is a conversation log. Produce a factual, neutral summary.\n'  
+                                                       'Do your only job properly: SUMMARIZE THE GIVEN CONVERSATION.'   
+                                                       "Do ****NOT**** try to be helpful and answer the given query, just summarise the given conversation. Output ONLY the updated summary text. No commentary.''')  
+  
                 if self.summary: text = f"Below is the previous rolling summary of the conversation.\nIt represents persisted memory.\nUpdate it ONLY if the new conversation content adds facts or contradicts it.\nIf nothing changes, reproduce it verbatim.\n\n<PREVIOUS_SUMMARY>\n{self.summary}\n</PREVIOUS_SUMMARY>" + text  
-
+  
                 entry = None  
                 try:  
                     async for (_, out, _ )in model.generate(text, [], stream=False, system_prompt_override=system):  
                         if out != ERROR_TOKEN and (out and isinstance(out, str) and out.strip()):  
-
+  
                             entry = out
-
+  
                 except Exception as e:  
                     await log(f"Error during summarization: {e}", "error")  
-
+  
                 if entry: 
                     self.summary = entry  
                     context = context[-keep_nums:]  
@@ -225,9 +225,9 @@ class AI:
                     async with self.context_lock:  
                         self.context = context  
                         await self.event_manager.emit_async("save_context_requested")  
-
+  
                 # TODO: Trim the context to remove older entries if needed explicitly  
-
+ 
                 return context
 
     async def route_query(self, query: str, manual: bool):
@@ -307,7 +307,7 @@ class AI:
 
         async with self.context_lock:
             context = list(self.context)
-
+       
         if self.summary: context.insert(0, {"role": "assistant", "content": f"[PERSISTED MEMORY – NOT DIALOGUE]\n[INTERNAL MEMORY — DO NOT REPEAT — NOT PART OF CONVERSATION]\nThe system generated summary of previous messages/turns. **Do NOT** treat this as the part of the conversation. For reference only. \n<SUMMARY>\n{self.summary}\n</SUMMARY>"}) # role:system is fatal.
 
         await self.event_manager.emit_async("generation_started", model_name=model_name, query=query)
@@ -323,7 +323,7 @@ class AI:
                 await queue.put(None)
 
             task = asyncio.create_task(producer())
-
+            
             while True:
                 item = await queue.get()
                 if item is None:
@@ -333,14 +333,14 @@ class AI:
                 content_final += content_chunk or ""
                 if tools_called is None:
                     tools_called = []
-
+                    
                 if tools_chunk:
                     tools_called.extend(tools_chunk)
 
                 await self.event_manager.emit_async("generation_chunk", model_name=model_name, thinking_chunk=thinking_chunk, content_chunk=content_chunk)
 
                 yield (thinking_chunk or "", content_chunk or "")
-
+        
             await task            
         else:
             await log(f"Non-streaming mode active", "info")
@@ -361,11 +361,11 @@ class AI:
             if context: self.context = context
             if query and query.strip(): 
                 self.context.append({'role': 'user', 'content': query})
-
+                
             self.context.append({'role': 'assistant', 'thinking': thinking_final, 'content': content_final, 'tool_calls': tools_called})
 
         await self.event_manager.emit_async("execute_tools_requested", tools=tools_called) # too lazy to update self.context here.
-
+       
         await self.event_manager.emit_async_block("save_context_requested") # just extra safe. 
 
     async def execute_tools(self, tools):
@@ -391,9 +391,9 @@ class AI:
             if tool_obj is None:
                 try:
                     results[tool_name] = await self.available_tools[tool_name](**tool_args)
-
+    
                     await self.event_manager.emit_async("tool_executed", tool = tool_obj)
-
+    
                     await log(f"Tool '{tool_name}' executed successfully.", "success")
                 except Exception as e:
                     await log(f"Error executing tool '{tool_name}': {e}", "error")
@@ -403,7 +403,7 @@ class AI:
             else:
                 await log(f"Something terrible happened while executing tool: {tool_name}", 'error')
                 continue
-
+            
             async with self.context_lock:
                     self.context.append(
                     {'role':'tool', 'tool_name':tool_name, 'content':str(results[tool_name])}
@@ -416,7 +416,7 @@ class AI:
     async def shut_down(self):
         await log("Shutting Down all services...", "info")
         await self.event_manager.stop_event()
-
+        
         for task in self.running_tasks:
             task.cancel()
             try:
