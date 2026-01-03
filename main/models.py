@@ -41,7 +41,7 @@ class Model:
         self.has_video = False
         self.available_roles= [] # ONLY accessed by the router model
         self.tools = []
-        self.state = IDLE
+        self.state = DOWN
         self.lock = asyncio.Lock()
 
     async def __aenter__(self):
