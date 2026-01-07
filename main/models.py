@@ -11,6 +11,7 @@ import base64
 from io import BytesIO
 import sys
 from signal import SIGKILL
+import inspect
 
 IDLE = "idle"
 BUSY = "busy"
@@ -41,13 +42,14 @@ class Model:
         self.has_video = False
         self.available_roles= [] # ONLY accessed by the router model
         self.tools = []
-        self.state = DOWN
-        self.lock = asyncio.Lock()
+        self.state = IDLE
+        self.state_lock = asyncio.Lock()
+        self.generation_lock = asyncio.Lock()
 
     async def __aenter__(self):
         await self.warm_up()
         return self
-    
+
     async def __aexit__(self, exc_type, exc_val, exc_tb):
         await self.shutdown()
 
@@ -117,7 +119,7 @@ class Model:
         roles = list(roles)
         self.available_roles.extend(roles)
         self.available_roles= list(set(self.available_roles)) # order doesn't matter 
-   
+
     async def warm_up(
         self,
         use_mmap=False,
@@ -126,7 +128,7 @@ class Model:
         custom_keep_alive_timeout: str = "5m",
         has_video_processing=False,
         warmup_video_path="main/test.mp4",):
-        async with self.lock:
+        async with self.state_lock:
             if self.state not in (IDLE, DOWN):
                 raise RuntimeError(f"{self.name} cannot warm up from state={self.state}")
             self.state = WARMING_UP
@@ -193,6 +195,10 @@ class Model:
                 "stream": False,
             }
 
+            headers = {"Content-Type": "application/json"}
+            endpoint = self._get_endpoint()
+            url = f"{self.host}{endpoint}"
+
             options = {}
             if self.use_mmap:
                 options["use_mmap"] = True
@@ -235,13 +241,45 @@ class Model:
 
             data["options"] = options
 
-            async with self.session.post(
-                f"{self.host}{self._get_endpoint()}",
-                headers={"Content-Type": "application/json"},
-                data=json.dumps(data),
-            ) as response:
-                response.raise_for_status()
+            await log('Trying Non-Streaming...' ,'info')
+            async with self.generation_lock:
+                async with self.session.post(url, headers=headers, data=json.dumps(data)) as response:  # type: ignore
+                    response.raise_for_status()
+                    try:
+                        resp = await response.json()
+                    except Exception as e:
+                        await log(f"Failed to load model's response while non streaming: {repr(e)}", 'error')
+                        raise Exception(f"Failed to load model's response while non streaming: {repr(e)}")
 
+            data['stream'] = True
+
+            await log('Trying Streaming...' ,'info')
+            buffer = ""
+            async with self.generation_lock:
+                try:
+                    async with self.session.post(url, headers=headers, data=json.dumps(data)) as response:  # type: ignore
+                        response.raise_for_status()
+
+                        async for chunk in response.content.iter_any():
+                            buffer += chunk.decode("utf-8")
+                            while "\n" in buffer:
+                                line, buffer = buffer.split("\n", 1)
+                                line = line.strip()
+                                if not line:
+                                    continue
+                                try:
+                                    json_line = json.loads(line)
+
+                                    _ = json_line.get("message", {}).get("thinking", "")
+                                    _ = json_line.get("message", {}).get("content", "")
+                                    _ = json_line.get("message", {}).get("tool_calls", []) 
+                                    await log(f"Raw streaming chunk: {json_line}", 'info')
+                                except json.JSONDecodeError:
+                                    continue
+                except Exception as e:
+                        await log(f"Failed to load model's response while streaming: {repr(e)}", 'error')
+                        raise Exception(f"Failed to load model's response while streaming: {repr(e)}")
+                    
             self.warmed_up = True
             await log(f"{self.name} ({self.ollama_name}) warmed up!", "success")
 
@@ -250,21 +288,26 @@ class Model:
             raise
 
         finally:
-            async with self.lock:
+            async with self.state_lock:
                 self.state = IDLE if self.warmed_up else DOWN
 
-        
+
     async def add_tools(self, *tool_dicts):
         for tool in tool_dicts:
             if isinstance(tool, Tool):
                 self.tools.append(tool.schema)
-            else:
+            elif isinstance(tool, dict):
                 self.tools.append(tool)
+            elif callable(tool) and not inspect.isclass(tool):
+                tool = Tool(tool, 'silent')
+                self.tools.append(tool.schema)
+            else:
+                await log(f"No valid type dectected for: {tool}", 'warn')
 
     async def generate(self, query: str, context: list[dict], stream: bool, think: str | bool | None = False, image_path: None | str = None, 
                        mod_ = 1, system_prompt_override: str | None = None):
         
-        async with self.lock:
+        async with self.state_lock:
             if self.state != IDLE:
                 await log(f"{self.name} is busy", "warn")
                 yield (None, ERROR_TOKEN, None)
@@ -287,7 +330,7 @@ class Model:
                 messages.append({'role': "system", 'content': self.system})
         else:
             messages.append({'role': "system", 'content': system_prompt_override})
-                
+
         messages += context + [{"role": "user", "content": query}]
 
         headers = {"Content-Type": "application/json"}
@@ -346,52 +389,53 @@ class Model:
             elif ext in VIDEO_EXTs and not self.has_video:
                 await log(f"Cannot process video file {image_path}: Model {self.name} is not configured for video processing.", 'warn')
 
-        async with self.lock:
+        async with self.state_lock:
             if self.state != BUSY:
                 yield (None, ERROR_TOKEN, None)
                 return
 
         buffer = ""
         try:
-            async with self.session.post(url, headers=headers, data=json.dumps(data)) as response:  # type: ignore
-                response.raise_for_status()
+            async with self.generation_lock:
+                async with self.session.post(url, headers=headers, data=json.dumps(data)) as response:  # type: ignore
+                    response.raise_for_status()
 
-                if stream:
-                    async for chunk in response.content.iter_any():
-                        buffer += chunk.decode("utf-8")
-                        while "\n" in buffer:
-                            line, buffer = buffer.split("\n", 1)
-                            line = line.strip()
-                            if not line:
-                                continue
-                            try:
-                                json_line = json.loads(line)
+                    if stream:
+                        async for chunk in response.content.iter_any():
+                            buffer += chunk.decode("utf-8")
+                            while "\n" in buffer:
+                                line, buffer = buffer.split("\n", 1)
+                                line = line.strip()
+                                if not line:
+                                    continue
+                                try:
+                                    json_line = json.loads(line)
 
-                                thinking_chunk = json_line.get("message", {}).get("thinking", "")
-                                content_chunk = json_line.get("message", {}).get("content", "")
-                                tools_chunk = json_line.get("message", {}).get("tool_calls", []) 
-                                yield (thinking_chunk, content_chunk, tools_chunk)
-                            except json.JSONDecodeError:
-                                continue
-                else:
-                    res_json = await response.json()
-                    thinking = res_json.get("message", {}).get("thinking", "")
-                    content = res_json.get("message", {}).get("content", "")
-                    tools = res_json.get("message", {}).get("tool_calls", [])
-                    yield (thinking, content, tools)
+                                    thinking_chunk = json_line.get("message", {}).get("thinking", "")
+                                    content_chunk = json_line.get("message", {}).get("content", "")
+                                    tools_chunk = json_line.get("message", {}).get("tool_calls", []) 
+                                    yield (thinking_chunk, content_chunk, tools_chunk)
+                                except json.JSONDecodeError:
+                                    continue
+                    else:
+                        res_json = await response.json()
+                        thinking = res_json.get("message", {}).get("thinking", "")
+                        content = res_json.get("message", {}).get("content", "")
+                        tools = res_json.get("message", {}).get("tool_calls", [])
+                        yield (thinking, content, tools)
 
         except Exception as e:
             await log(f"Ollama API Request Error: {e}", "error")
             yield (None, ERROR_TOKEN, None)
         finally:
-            async with self.lock:
+            async with self.state_lock:
                 if self.state == BUSY:
                     self.state = IDLE
 
 
     async def shutdown(self):
         await log(f"Shutting down {self.name}...", "info")
-        async with self.lock:
+        async with self.state_lock:
             if self.state in (DOWN, SHUTTING_DOWN):
                 return
             self.state = SHUTTING_DOWN
@@ -439,6 +483,6 @@ class Model:
                 pass
             self._log_file = None
 
-        async with self.lock:
+        async with self.state_lock:
             self.state = DOWN
         await log(f"{self.name} shutdown complete.", "success")
