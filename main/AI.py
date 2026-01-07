@@ -2,9 +2,11 @@ import asyncio
 import aiofiles
 import aiohttp
 import json
+import inspect
 from .utils import log, load_tools, Tool
 from .models import Model
 from .Events import Event_Manager
+from .router import Router
 from .configs import ( 
     CoT_PROMPT, 
     CHAT_PROMPT, 
@@ -35,13 +37,14 @@ class AI:
             'vision': VISION_PROMPT,
             'summarizer': SUMMARIZER_PROMPT,
         }
-        self.default_model = 'chat'
-        self.load_models()
+        self.default_role = 'chat'
         self.running_tasks = set()
         self.tools_regis = {}
         self.context_lock = asyncio.Lock()
         self.summary: str | None = None
         self.context = []
+        self.router = None
+        self.load_models()
 
     def load_models(self):
         try:
@@ -54,10 +57,9 @@ class AI:
                         self.models[role] = Model(**model_data)
         except (FileNotFoundError, json.JSONDecodeError) as e:
             print(f"🟥 Error loading models: {e}")
-            raise Exception("死ね")
+            raise Exception("Models loading failed.", e)
 
-    async def init(self, platform: str, tools:list=[], max_summarize_nums=20, 
-                summarize_model_role='chat'):
+    async def init(self, platform: str, tools:list=[]):
         self.context = await self.load_context()
         self.platform = platform
         self.event_manager = Event_Manager()
@@ -69,25 +71,28 @@ class AI:
                 self.event_manager.on(method._event_trigger)(method)
 
         await log("Warming up all models...", "info", append=False)
-        available_tools = [*tools]
-        
-        self.available_tools = {str(t.__name__): t for t in available_tools}
 
-        tool_defs = await load_tools(*(self.available_tools.values()))
+        tool_defs = await load_tools(tools)
 
-        for tool in tool_defs: 
-           if isinstance(tool, Tool):self.tools_regis[tool.name] = tool
+        for tool in tool_defs:
+            if isinstance(tool, Tool):
+                self.tools_regis[tool.name] = tool
+            elif callable(tool) and not inspect.isclass(tool):
+                tool = Tool(tool, 'silent')
+                self.tools_regis[tool.name] = tool
+            else:
+                await log(f"{tool} can't be parsed, skipping...", 'warn')
 
         for model in self.models.values():
             if model.has_tools:
                 await model.add_tools(*tool_defs)
-            if model.role == "router": model.add_to_available_roles("chat", "cot")
                 
             await model.warm_up()
         check_task = asyncio.create_task(self.check_models())
         self.running_tasks.add(check_task)
 
         check_task.add_done_callback(lambda t: self.running_tasks.discard(t))
+        self.router = Router(self.models.get("router"), self.default_role, "chat", "cot")
 
     @on_event("save_context_requested")
     async def _handle_save_event(self, **kwargs):
@@ -230,70 +235,13 @@ class AI:
  
                 return context
 
-    async def route_query(self, query: str, manual: bool):
-        if not manual:
-            router_model = self.models.get("router")
-            if not router_model:
-                await log("Router model not configured. Using default.", "error")
-                return query, self.default_model
-
-            router_resp_parts = []
-            async with self.context_lock:
-                context = list(self.context)
-
-            async for _, part, _ in router_model.generate(query, context, stream=False):
-                if part == ERROR_TOKEN:
-                    await log("Router API call failed. Using default.", "error")
-                    return query, self.default_model
-                if part:
-                    router_resp_parts.append(part)
-
-            router_resp_raw = "".join(router_resp_parts).strip()
-            selected_role = None
-
-            await log(f"Router raw response: {router_resp_raw}", "info")
-
-            try:
-                router_resp = json.loads(router_resp_raw)
-                if isinstance(router_resp, dict):
-                    selected_role = router_resp.get("role", "").strip().lower()
-            except json.JSONDecodeError:
-                selected_role = router_resp_raw.lower().strip()
-
-            if selected_role in self.models:
-                await log(f"Router selected model '{selected_role}'.", "info")
-                await self.event_manager.emit_async("router_selected", query=query, selected_role=selected_role)
-                return query, selected_role
-            else:
-                await log(f"Router selected unknown role or failed to parse ('{selected_role}'). Using default '{self.default_model}'.", "warn")
-                await self.event_manager.emit_async("router_selected", query=query, selected_role=self.default_model)
-                return query, self.default_model
-        else:
-            if query.startswith("!chat"):
-                query = query.removeprefix("!chat").strip()
-                self.models['chat'].system = CHAT_PROMPT
-                await self.event_manager.emit_async("router_selected", query=query, selected_role="chat")
-                return query, "chat"
-            elif query.startswith("!cot"):
-                query = query.removeprefix("!cot").strip()
-                await self.event_manager.emit_async("router_selected", query=query, selected_role="cot")
-                return query, "cot"
-            elif query.startswith("!chaos"):
-                query = query.removeprefix("!chaos").strip()
-                self.models['chat'].system = CHAOS_PROMPT
-                await self.event_manager.emit_async("router_selected", query=query, selected_role="chat")
-                return query, "chat"
-            elif query.startswith("!vision"):
-                query = query.removeprefix("!vision").strip()
-                await self.event_manager.emit_async("router_selected", query=query, selected_role="vision")
-                return query, "vision"
-            else:
-                await log(f"No or incorrect prefix, using default '{self.default_model}'", "info")
-                await self.event_manager.emit_async("router_selected", query=query, selected_role=self.default_model)
-                return query, self.default_model
-
     async def generate(self, query, stream: None | bool = None, manual_routing=False, think=None, image_path=None):
-        query, model_name = await self.route_query(query, manual_routing)
+        async with self.context_lock:
+            context = list(self.context)
+        query, model_name = await self.router.route_query(query, context, manual_routing) if self.router else query, self.default_role
+        if not model_name: 
+            model_name = self.default_role
+
         model = self.models[model_name]
 
         if stream is None:
@@ -304,9 +252,6 @@ class AI:
         content_final = ""
         thinking_final = ""
         tools_called = None
-
-        async with self.context_lock:
-            context = list(self.context)
        
         if self.summary: context.insert(0, {"role": "assistant", "content": f"[PERSISTED MEMORY – NOT DIALOGUE]\n[INTERNAL MEMORY — DO NOT REPEAT — NOT PART OF CONVERSATION]\nThe system generated summary of previous messages/turns. **Do NOT** treat this as the part of the conversation. For reference only. \n<SUMMARY>\n{self.summary}\n</SUMMARY>"}) # role:system is fatal.
 
@@ -370,7 +315,6 @@ class AI:
 
     async def execute_tools(self, tools):
         results = {}
-        type_ = 'silent'
         if not tools:
             return results
 
@@ -381,36 +325,28 @@ class AI:
 
             await log(f"Executing tool: {tool['function'].get('name')}", "info")    
             tool_name = tool['function'].get('name')
+            tool_idx = tool['function'].get('index')
             tool_args = tool['function'].get('arguments', {})
 
-            if tool_name not in self.available_tools:
-                await log(f"Tool '{tool_name}' not available. Available tools: {list(self.available_tools.keys())}", "warn")
-                results[tool_name] = f"Tool '{tool_name}' not found"
+            if not tool_name in self.tools_regis.keys():
+                await log(f"{tool_name} is not in the registory. Skipping...", 'warn')
                 continue
-            tool_obj = self.tools_regis.get(tool_name)
-            if tool_obj is None:
-                try:
-                    results[tool_name] = await self.available_tools[tool_name](**tool_args)
-    
-                    await self.event_manager.emit_async("tool_executed", tool = tool_obj)
-    
-                    await log(f"Tool '{tool_name}' executed successfully.", "success")
-                except Exception as e:
-                    await log(f"Error executing tool '{tool_name}': {e}", "error")
-                    results[tool_name] = f"Error executing tool '{tool_name}': {e}"
-            elif tool_obj is not None and isinstance(tool_obj, Tool):
-                results[tool_name] = await tool_obj.execute(**tool_args)
-            else:
-                await log(f"Something terrible happened while executing tool: {tool_name}", 'error')
+
+            tool_instance = self.tools_regis.get(tool_name)
+            if not isinstance(tool_instance, Tool):
+                await log(f"Found no matching `Tool` instance for {tool_name}. Skipping...", 'warn')
                 continue
-            
+
+            result = await tool_instance.execute(**tool_args)
+            results[tool_idx] = result
+
             async with self.context_lock:
                     self.context.append(
-                    {'role':'tool', 'tool_name':tool_name, 'content':str(results[tool_name])}
+                    {'role':'tool', 'tool_name':tool_name, 'content':str(results[tool_idx])}
                     )
-            if tool_obj is not None: 
-                await self.event_manager.emit_async("tool_executed", tool = tool_obj)
+            if isinstance(tool_instance, Tool): await self.event_manager.emit_async("tool_executed", tool = tool_instance)
             await self.event_manager.emit_async_block("save_context_requested")
+
         return results
 
     async def shut_down(self):
