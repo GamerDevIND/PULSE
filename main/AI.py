@@ -1,3 +1,4 @@
+
 import asyncio
 import aiofiles
 import aiohttp
@@ -45,6 +46,8 @@ class AI:
         self.context = []
         self.router = None
         self.load_models()
+        self.active_model = None
+        self.generation_task = None
 
     def load_models(self):
         try:
@@ -235,10 +238,34 @@ class AI:
  
                 return context
 
+    async def cancel_generation(self):
+        model = task = False
+        
+        if self.active_model:
+            self.active_model.cancel()
+            model = True
+
+        if self.generation_task:
+            if not self.generation_task.done():
+                self.generation_task.cancel()
+                task = True
+                try:
+                    await self.generation_task
+                except asyncio.CancelledError:
+                    pass
+
+        if model:
+            await log("Model loop aborted", "info")
+
+        if task:
+            await log("Streaming task aborted", "info")
+            
+        if task and model: await log('Generation camcelled by user', 'info')
+
     async def generate(self, query, stream: None | bool = None, manual_routing=False, think=None, image_path=None):
         async with self.context_lock:
             context = list(self.context)
-        query, model_name = await self.router.route_query(query, context, manual_routing) if self.router else query, self.default_role
+        query, model_name = await self.router.route_query(query, context, manual_routing) if self.router else (query, self.default_role)
         if not model_name: 
             model_name = self.default_role
 
@@ -261,15 +288,24 @@ class AI:
         if stream:
             queue = asyncio.Queue()
             async def producer():
-                async for (thinking_chunk, content_chunk, tools_chunk) in model.generate(query, context, True,think=think, image_path=image_path):
-                    if content_chunk == ERROR_TOKEN:
-                        break
-                    await queue.put((thinking_chunk, content_chunk, tools_chunk))
-                await queue.put(None)
+                try:
+                    async for (thinking_chunk, content_chunk, tools_chunk) in model.generate(query, context, True,think=think, image_path=image_path):
+                        if content_chunk == ERROR_TOKEN:
+                            break
+                        await queue.put((thinking_chunk, content_chunk, tools_chunk))
+                except asyncio.CancelledError:
+                    pass
+                finally:
+                    await queue.put(None)
 
             task = asyncio.create_task(producer())
+
+            self.generation_task = task
+            self.active_model = model
             
             while True:
+                if not self.generation_task or self.generation_task.cancelled():
+                    break
                 item = await queue.get()
                 if item is None:
                     break
@@ -308,6 +344,9 @@ class AI:
                 self.context.append({'role': 'user', 'content': query})
                 
             self.context.append({'role': 'assistant', 'thinking': thinking_final, 'content': content_final, 'tool_calls': tools_called})
+        
+        self.active_model = None
+        self.generation_task = None
 
         await self.event_manager.emit_async("execute_tools_requested", tools=tools_called) # too lazy to update self.context here.
        
