@@ -44,7 +44,7 @@ class Model:
         self.tools = []
         self.state = IDLE
         self.state_lock = asyncio.Lock()
-        self.generation_lock = asyncio.Lock()
+        self.generation_cancelled = False
 
     async def __aenter__(self):
         await self.warm_up()
@@ -242,44 +242,42 @@ class Model:
             data["options"] = options
 
             await log('Trying Non-Streaming...' ,'info')
-            async with self.generation_lock:
-                async with self.session.post(url, headers=headers, data=json.dumps(data)) as response:  # type: ignore
-                    response.raise_for_status()
-                    try:
-                        resp = await response.json()
-                    except Exception as e:
-                        await log(f"Failed to load model's response while non streaming: {repr(e)}", 'error')
-                        raise Exception(f"Failed to load model's response while non streaming: {repr(e)}")
+            async with self.session.post(url, headers=headers, data=json.dumps(data)) as response:  # type: ignore
+                response.raise_for_status()
+                try:
+                    resp = await response.json()
+                except Exception as e:
+                    await log(f"Failed to load model's response while non streaming: {repr(e)}", 'error')
+                    raise Exception(f"Failed to load model's response while non streaming: {repr(e)}")
 
             data['stream'] = True
 
             await log('Trying Streaming...' ,'info')
             buffer = ""
-            async with self.generation_lock:
-                try:
-                    async with self.session.post(url, headers=headers, data=json.dumps(data)) as response:  # type: ignore
-                        response.raise_for_status()
+            try:
+                async with self.session.post(url, headers=headers, data=json.dumps(data)) as response:  # type: ignore
+                    response.raise_for_status()
 
-                        async for chunk in response.content.iter_any():
-                            buffer += chunk.decode("utf-8")
-                            while "\n" in buffer:
-                                line, buffer = buffer.split("\n", 1)
-                                line = line.strip()
-                                if not line:
-                                    continue
-                                try:
-                                    json_line = json.loads(line)
+                    async for chunk in response.content.iter_any():
+                        buffer += chunk.decode("utf-8")
+                        while "\n" in buffer:
+                            line, buffer = buffer.split("\n", 1)
+                            line = line.strip()
+                            if not line:
+                                continue
+                            try:
+                                json_line = json.loads(line)
 
-                                    _ = json_line.get("message", {}).get("thinking", "")
-                                    _ = json_line.get("message", {}).get("content", "")
-                                    _ = json_line.get("message", {}).get("tool_calls", []) 
-                                    await log(f"Raw streaming chunk: {json_line}", 'info')
-                                except json.JSONDecodeError:
-                                    continue
-                except Exception as e:
-                        await log(f"Failed to load model's response while streaming: {repr(e)}", 'error')
-                        raise Exception(f"Failed to load model's response while streaming: {repr(e)}")
-
+                                _ = json_line.get("message", {}).get("thinking", "")
+                                _ = json_line.get("message", {}).get("content", "")
+                                _ = json_line.get("message", {}).get("tool_calls", []) 
+                                await log(f"Raw streaming chunk: {json_line}", 'info')
+                            except json.JSONDecodeError:
+                                continue
+            except Exception as e:
+                    await log(f"Failed to load model's response while streaming: {repr(e)}", 'error')
+                    raise Exception(f"Failed to load model's response while streaming: {repr(e)}")
+                    
             self.warmed_up = True
             await log(f"{self.name} ({self.ollama_name}) warmed up!", "success")
 
@@ -304,9 +302,12 @@ class Model:
             else:
                 await log(f"No valid type dectected for: {tool}", 'warn')
 
+    def cancel(self):
+        self.generation_cancelled = True
+    
     async def generate(self, query: str, context: list[dict], stream: bool, think: str | bool | None = False, image_path: None | str = None, 
                        mod_ = 1, system_prompt_override: str | None = None):
-
+        
         async with self.state_lock:
             if self.state != IDLE:
                 await log(f"{self.name} is busy", "warn")
@@ -396,39 +397,46 @@ class Model:
 
         buffer = ""
         try:
-            async with self.generation_lock:
-                async with self.session.post(url, headers=headers, data=json.dumps(data)) as response:  # type: ignore
-                    response.raise_for_status()
+            async with self.session.post(url, headers=headers, data=json.dumps(data)) as response:  # type: ignore
+                response.raise_for_status()
 
-                    if stream:
-                        async for chunk in response.content.iter_any():
-                            buffer += chunk.decode("utf-8")
-                            while "\n" in buffer:
-                                line, buffer = buffer.split("\n", 1)
-                                line = line.strip()
-                                if not line:
-                                    continue
-                                try:
-                                    json_line = json.loads(line)
+                if stream:
+                    async for chunk in response.content.iter_any():
+                        buffer += chunk.decode("utf-8")
+                        while "\n" in buffer:
+                            line, buffer = buffer.split("\n", 1)
+                            line = line.strip()
+                            if not line:
+                                continue
+                            if self.generation_cancelled:
+                                await response.release()
+                                break
+                            try:
+                                json_line = json.loads(line)
 
-                                    thinking_chunk = json_line.get("message", {}).get("thinking", "")
-                                    content_chunk = json_line.get("message", {}).get("content", "")
-                                    tools_chunk = json_line.get("message", {}).get("tool_calls", []) 
-                                    yield (thinking_chunk, content_chunk, tools_chunk)
-                                except json.JSONDecodeError:
-                                    continue
-                    else:
-                        res_json = await response.json()
-                        thinking = res_json.get("message", {}).get("thinking", "")
-                        content = res_json.get("message", {}).get("content", "")
-                        tools = res_json.get("message", {}).get("tool_calls", [])
-                        yield (thinking, content, tools)
+                                thinking_chunk = json_line.get("message", {}).get("thinking", "")
+                                content_chunk = json_line.get("message", {}).get("content", "")
+                                tools_chunk = json_line.get("message", {}).get("tool_calls", []) 
+                                yield (thinking_chunk, content_chunk, tools_chunk)
+
+                            except json.JSONDecodeError:
+                                continue
+                        if self.generation_cancelled:
+                            await response.release()
+                            break
+                else:
+                    res_json = await response.json()
+                    thinking = res_json.get("message", {}).get("thinking", "")
+                    content = res_json.get("message", {}).get("content", "")
+                    tools = res_json.get("message", {}).get("tool_calls", [])
+                    yield (thinking, content, tools)
 
         except Exception as e:
             await log(f"Ollama API Request Error: {e}", "error")
             yield (None, ERROR_TOKEN, None)
         finally:
             async with self.state_lock:
+                self.generation_cancelled = False
                 if self.state == BUSY:
                     self.state = IDLE
 
