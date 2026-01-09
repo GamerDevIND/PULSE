@@ -294,9 +294,9 @@ class AI:
                             break
                         await queue.put((thinking_chunk, content_chunk, tools_chunk))
                 except asyncio.CancelledError:
-                    pass
+                    raise
                 finally:
-                    await queue.put(None)
+                    queue.put_nowait(None)
 
             task = asyncio.create_task(producer())
 
@@ -304,8 +304,6 @@ class AI:
             self.active_model = model
             
             while True:
-                if not self.generation_task or self.generation_task.cancelled():
-                    break
                 item = await queue.get()
                 if item is None:
                     break
