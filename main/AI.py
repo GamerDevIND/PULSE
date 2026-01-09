@@ -244,11 +244,13 @@ class AI:
         if self.active_model:
             self.active_model.cancel()
             model = True
+            self.active_model = None
 
         if self.generation_task:
             if not self.generation_task.done():
                 self.generation_task.cancel()
                 task = True
+                self.generation_task = None
                 try:
                     await self.generation_task
                 except asyncio.CancelledError:
