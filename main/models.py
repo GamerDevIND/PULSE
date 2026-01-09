@@ -1,496 +1,404 @@
-import os
-import json
+
 import asyncio
-import subprocess
-import aiohttp
 import aiofiles
-import av
-from .utils import log, Tool
-from .configs import ERROR_TOKEN, VIDEO_EXTs, IMAGE_EXTs
-import base64
-from io import BytesIO
-import sys
-from signal import SIGKILL
+import aiohttp
+import json
 import inspect
+from .utils import log, load_tools, Tool
+from .models import Model
+from .Events import Event_Manager
+from .router import Router
+from .configs import ( 
+    CoT_PROMPT, 
+    CHAT_PROMPT, 
+    ROUTER_PROMPT, 
+    DEFAULT_PROMPT, 
+    CHAOS_PROMPT, 
+    STREAM_DISABLED,
+    ERROR_TOKEN,
+    VISION_PROMPT,
+    SUMMARIZER_PROMPT
+)
 
-IDLE = "idle"
-BUSY = "busy"
-SHUTTING_DOWN = "shutting_down"
-DOWN = "down"
-WARMING_UP = "warming_up"
+def on_event(event_name):
+    def decorator(func):
+        func._event_trigger = event_name
+        return func
+    return decorator
+    
+class AI:
+    def __init__(self, model_config_path="main/Models_config.json", context_path="main/saves/context.json"):
+        self.model_config_path = model_config_path
+        self.context_path = context_path
+        self.models: dict[str, Model] = {}
+        self.system_prompts = {
+            "chat": CHAT_PROMPT,
+            "router": ROUTER_PROMPT,
+            "cot": CoT_PROMPT,
+            'vision': VISION_PROMPT,
+            'summarizer': SUMMARIZER_PROMPT,
+        }
+        self.default_role = 'chat'
+        self.running_tasks = set()
+        self.tools_regis = {}
+        self.context_lock = asyncio.Lock()
+        self.summary: str | None = None
+        self.context = []
+        self.router = None
+        self.load_models()
+        self.active_model = None
+        self.generation_task = None
 
-class Model:
-    def __init__(self, role: str, name: str, ollama_name: str, has_tools: bool, has_CoT: bool, has_vision: bool, port: int, system_prompt: str):
-        self.role = role
-        self.name = name
-        self.ollama_name = ollama_name
-        self.has_tools = has_tools
-        self.has_CoT = has_CoT
-        self.has_vision = has_vision
-        self.port = port
-        self.system = system_prompt
-        self.host = f"http://localhost:{self.port}"
-        self.start_command = ["ollama", "serve"]
-        self.ollama_env = os.environ.copy()
-        self.ollama_env["OLLAMA_HOST"] = self.host
-        self.warmed_up = False
-        self.session: aiohttp.ClientSession | None = None
-        self.process = None
-        self.use_custom_keep_alive_timeout = False
-        self.custom_keep_alive_timeout = "5m"
-        self.use_mmap = False
-        self.has_video = False
-        self.available_roles= [] # ONLY accessed by the router model
-        self.tools = []
-        self.state = IDLE
-        self.state_lock = asyncio.Lock()
-        self.generation_cancelled = False
-
-    async def __aenter__(self):
-        await self.warm_up()
-        return self
-
-    async def __aexit__(self, exc_type, exc_val, exc_tb):
-        await self.shutdown()
-
-    def _get_endpoint(self) -> str:
-        return "/api/chat"
-
-    async def wait_until_ready(self, url: str, timeout: int = 30):
-        await log(f"Waiting for {self.name} on {url}...", "info")
-        for i in range(timeout):
-            try:
-                async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=5)) as session:
-                    async with session.get(f"{url}/api/tags") as res:
-                        if res.status == 200:
-                            await log(f"{self.name} is ready!", "success")
-                            return
-            except (aiohttp.ClientError, asyncio.TimeoutError) as e:
-                await log(f"Retries: {i+1} / {timeout}", "info")
-
-                if self.process is not None and self.process.poll() is not None:
-                    try:
-                        if hasattr(self, '_log_file') and self._log_file is not None and hasattr(self._log_file, 'name'):
-                            self._log_file.flush()
-                            try:
-                                async with aiofiles.open(self._log_file.name, 'r') as lf:
-                                    content = await lf.read()
-                                    tail = '\n'.join(content.splitlines()[-30:])
-                                    await log(f"{self.name} process terminated. Recent logs:\n{tail}", 'error')
-                            except (FileNotFoundError, PermissionError, OSError) as log_e:
-                                await log(f"Could not read log file for {self.name}: {log_e}", 'error')
-                    except (OSError, AttributeError) as proc_e:
-                        await log(f"Error checking process status for {self.name}: {proc_e}", 'error')
-            await asyncio.sleep(1)
-        raise TimeoutError(f"🟥 Ollama server for {self.name} did not start in time.")
-
-    async def _encode_frames_from_vid(self, video_path, mod_ = 1):
-        if not self.has_vision:
-            return [], None
+    def load_models(self):
         try:
-            container = av.open(video_path)
-            frames = []
-            await log("Audio processing hasn't been implemented yet.", 'warn')
-            video_stream = next((s for s in container.streams if s.type == 'video'), None)
-            if not video_stream:
-                raise ValueError("No video stream found in the file.")
-            for i, frame in enumerate(container.decode(video_stream)): # type: ignore
-                if i % mod_ == 0:
-                    img = frame.to_image() # type: ignore
-                    buffer = BytesIO()
-                    img.save(buffer, format="PNG")
-                    frame_b64 = base64.b64encode(buffer.getvalue()).decode("utf-8")
-                    frames.append(frame_b64)
-            return frames, None
-        except Exception as e:
-            await log(f"Error in video frame encoding for {self.name}: {e}", 'error')
-            return ERROR_TOKEN, e
+            with open(self.model_config_path, 'r', encoding="utf-8") as f:
+                models_data = json.load(f)
+                for model_data in models_data:
+                    role = model_data.get('role')
+                    if role:
+                        model_data["system_prompt"] = self.system_prompts.get(role, DEFAULT_PROMPT)
+                        self.models[role] = Model(**model_data)
+        except (FileNotFoundError, json.JSONDecodeError) as e:
+            print(f"🟥 Error loading models: {e}")
+            raise Exception("Models loading failed.", e)
 
-    async def _encode_image(self, image_path):
-        try:
-            async with aiofiles.open(image_path, "rb") as image_file:
-                image_data = await image_file.read()
-            base64_image = base64.b64encode(image_data).decode("utf-8")
-            return base64_image, None
-        except Exception as e:
-            return ERROR_TOKEN, e
+    async def init(self, platform: str, tools:list=[]):
+        self.context = await self.load_context()
+        self.platform = platform
+        self.event_manager = Event_Manager()
+        await self.event_manager.start_event()
 
-    def add_to_available_roles(self, *roles):
-        roles = list(roles)
-        self.available_roles.extend(roles)
-        self.available_roles= list(set(self.available_roles)) # order doesn't matter 
+        for name in dir(self):
+            method = getattr(self, name)
+            if hasattr(method, "_event_trigger"):
+                self.event_manager.on(method._event_trigger)(method)
 
-    async def warm_up(
-        self,
-        use_mmap=False,
-        warmup_image_path="main/test.jpg",
-        use_custom_keep_alive_timeout=False,
-        custom_keep_alive_timeout: str = "5m",
-        has_video_processing=False,
-        warmup_video_path="main/test.mp4",):
-        async with self.state_lock:
-            if self.state not in (IDLE, DOWN):
-                raise RuntimeError(f"{self.name} cannot warm up from state={self.state}")
-            self.state = WARMING_UP
+        await log("Warming up all models...", "info", append=False)
 
-        try:
-            self.use_custom_keep_alive_timeout = use_custom_keep_alive_timeout
-            self.custom_keep_alive_timeout = custom_keep_alive_timeout
-            self.use_mmap = use_mmap
-            self.has_video = has_video_processing
+        tool_defs = await load_tools(tools)
 
-            is_actually_alive = False
-            try:
-                async with aiohttp.ClientSession(
-                    timeout=aiohttp.ClientTimeout(total=2)
-                ) as session:
-                    async with session.get(f"{self.host}/api/tags") as res:
-                        if res.status == 200:
-                            is_actually_alive = True
-            except Exception:
-                pass
-
-            if is_actually_alive:
-                if not self.session or self.session.closed:
-                    self.session = aiohttp.ClientSession()
-                self.warmed_up = True
-                await log(f"{self.name} is already alive on {self.host}. Re-linked.", "success")
-                return
-            if self.warmed_up and self.process and self.process.poll() is None:
-                await log(
-                    f"{self.name} process already running and warmed. Skipping restart.",
-                    "success",
-                )
-                return
-
-            log_dir = os.path.join("main", "logs")
-            os.makedirs(log_dir, exist_ok=True)
-            log_file_path = os.path.join(log_dir, f"{self.ollama_name}.log")
-
-            f = open(log_file_path, "w")
-            self._log_file = f
-
-            creationflags = (
-                subprocess.CREATE_NEW_PROCESS_GROUP if sys.platform == "win32" else 0
-            )
-            start_new_session = sys.platform != "win32"
-
-            self.process = subprocess.Popen(
-                self.start_command,
-                env=self.ollama_env,
-                stderr=subprocess.STDOUT,
-                stdout=f,
-                creationflags=creationflags,
-                start_new_session=start_new_session,
-            )
-
-            await self.wait_until_ready(self.host)
-
-            if not self.session:
-                self.session = aiohttp.ClientSession()
-
-            data = {
-                "model": self.ollama_name,
-                "messages": [{"role": "user", "content": "hi"}],
-                "stream": False,
-            }
-
-            headers = {"Content-Type": "application/json"}
-            endpoint = self._get_endpoint()
-            url = f"{self.host}{endpoint}"
-
-            options = {}
-            if self.use_mmap:
-                options["use_mmap"] = True
-            if self.use_custom_keep_alive_timeout:
-                options["keep_alive"] = self.custom_keep_alive_timeout
-
-            if self.role.lower() == 'router':
-                if len(self.available_roles) < 1:
-                    await log("No role provided", "error") 
-                    raise Exception("No role provided")
-                data["format"] = {
-                    "type": "object",
-                    "properties": {
-                        "role": {"type": "string", "enum": self.available_roles, "description": "Selected role or model"}
-                    }, # I'll add more
-                    "required": ["role"]
-                }
-
-            if self.has_vision:
-                if self.has_video and os.path.exists(warmup_video_path):
-                    await log("Warming up with video frame extraction...", 'info')
-                    encoded_frames, e = await self._encode_frames_from_vid(warmup_video_path, mod_=10)
-                    if encoded_frames == ERROR_TOKEN:
-                        await log(f"Error encoding video frames for warmup: {e}", 'error')
-                        raise Exception(f"Error encoding video frames for warmup: {e}")
-                    if encoded_frames:
-                        if "messages" in data:
-                            data['messages'][-1]['images'] = encoded_frames
-                elif os.path.exists(warmup_image_path):
-                    await log("Warming up with static image...", 'info')
-                    encoded_image, e = await self._encode_image(warmup_image_path)
-                    if encoded_image == ERROR_TOKEN:
-                        await log(f"Error encoding image for warmup!: {e}", 'error')
-                        raise Exception(f"Error encoding image for warmup!: {e}")
-                    else:
-                        if "messages" in data:
-                            data['messages'][-1]['images'] = [encoded_image]
-                else:
-                    await log("Vision model, but no video processing enabled and no warmup image / video found. Skipping vision test.", 'warn')
-
-            data["options"] = options
-
-            await log('Trying Non-Streaming...' ,'info')
-            async with self.session.post(url, headers=headers, data=json.dumps(data)) as response:  # type: ignore
-                response.raise_for_status()
-                try:
-                    resp = await response.json()
-                except Exception as e:
-                    await log(f"Failed to load model's response while non streaming: {repr(e)}", 'error')
-                    raise Exception(f"Failed to load model's response while non streaming: {repr(e)}")
-
-            data['stream'] = True
-
-            await log('Trying Streaming...' ,'info')
-            buffer = ""
-            try:
-                async with self.session.post(url, headers=headers, data=json.dumps(data)) as response:  # type: ignore
-                    response.raise_for_status()
-
-                    async for chunk in response.content.iter_any():
-                        buffer += chunk.decode("utf-8")
-                        while "\n" in buffer:
-                            line, buffer = buffer.split("\n", 1)
-                            line = line.strip()
-                            if not line:
-                                continue
-                            try:
-                                json_line = json.loads(line)
-
-                                _ = json_line.get("message", {}).get("thinking", "")
-                                _ = json_line.get("message", {}).get("content", "")
-                                _ = json_line.get("message", {}).get("tool_calls", []) 
-                                await log(f"Raw streaming chunk: {json_line}", 'info')
-                            except json.JSONDecodeError:
-                                continue
-            except Exception as e:
-                    await log(f"Failed to load model's response while streaming: {repr(e)}", 'error')
-                    raise Exception(f"Failed to load model's response while streaming: {repr(e)}")
-                    
-            self.warmed_up = True
-            await log(f"{self.name} ({self.ollama_name}) warmed up!", "success")
-
-        except Exception:
-            self.warmed_up = False
-            raise
-
-        finally:
-            async with self.state_lock:
-                self.state = IDLE if self.warmed_up else DOWN
-
-
-    async def add_tools(self, *tool_dicts):
-        for tool in tool_dicts:
+        for tool in tool_defs:
             if isinstance(tool, Tool):
-                self.tools.append(tool.schema)
-            elif isinstance(tool, dict):
-                self.tools.append(tool)
+                self.tools_regis[tool.name] = tool
             elif callable(tool) and not inspect.isclass(tool):
                 tool = Tool(tool, 'silent')
-                self.tools.append(tool.schema)
+                self.tools_regis[tool.name] = tool
             else:
-                await log(f"No valid type dectected for: {tool}", 'warn')
+                await log(f"{tool} can't be parsed, skipping...", 'warn')
 
-    def cancel(self):
-        self.generation_cancelled = True
-    
-    async def generate(self, query: str, context: list[dict], stream: bool, think: str | bool | None = False, image_path: None | str = None, 
-                       mod_ = 1, system_prompt_override: str | None = None):
-        
-        async with self.state_lock:
-            if self.state != IDLE:
-                await log(f"{self.name} is busy", "warn")
-                yield (None, ERROR_TOKEN, None)
-                return
-            self.state = BUSY
+        for model in self.models.values():
+            if model.has_tools:
+                await model.add_tools(*tool_defs)
+                
+            await model.warm_up()
+        check_task = asyncio.create_task(self.check_models())
+        self.running_tasks.add(check_task)
 
+        check_task.add_done_callback(lambda t: self.running_tasks.discard(t))
+        self.router = Router(self.models.get("router"), self.default_role, "chat", "cot")
 
-        await log(f"Generating response from {self.name}...", "info")
+    @on_event("save_context_requested")
+    async def _handle_save_event(self, **kwargs):
+        await self.save_context()
 
-        endpoint = self._get_endpoint()
-        url = f"{self.host}{endpoint}"
+    @on_event("execute_tools_requested")
+    async def _handle_tool_event(self, tools, **kwargs):
+        if tools:
+            await self.execute_tools(tools)
 
-        if not self.session or self.session.closed:
-            self.session = aiohttp.ClientSession()
-
-
-        messages = []
-        if system_prompt_override is None:
-            if self.system:
-                messages.append({'role': "system", 'content': self.system})
-        else:
-            messages.append({'role': "system", 'content': system_prompt_override})
-
-        messages += context + [{"role": "user", "content": query}]
-
-        headers = {"Content-Type": "application/json"}
-
-        data = {
-            "model": self.ollama_name,
-            "messages": messages,
-            "stream": stream
-        }
-
-        if self.role.lower() == 'router':
-            if len(self.available_roles) < 1:
-                await log("No role provided", "error") 
-                raise  Exception("No role provided")
-
-
-            data["format"] = {
-                "type": "object",
-                "properties": {
-                    "role": {"type": "string", "enum": self.available_roles, "description": "Selected role or model"}
-                }, # I'll add more
-                "required": ["role"]
-                }
-        elif self.has_tools:
-            data["tools"] = self.tools
-
-        options = {}
-        if self.use_mmap:
-            options["use_mmap"] = True
-        if self.use_custom_keep_alive_timeout:
-            options["keep_alive"] = self.custom_keep_alive_timeout
-        if options:
-            data["options"] = options
-
-        if self.has_CoT and think is not None:
-            data['think'] = think
-
-        if self.has_vision and image_path is not None:
-            ext = os.path.splitext(image_path)[1].lower()
-            if ext in IMAGE_EXTs:
-                image, e = await self._encode_image(image_path)
-                if image == ERROR_TOKEN:
-                    await log(f"Error encoding image!: {repr(e)}", 'error')
-                    yield (None, ERROR_TOKEN, None)
-                    return
-                else:
-                    data['messages'][-1]['images'] = [image]
-            elif ext in VIDEO_EXTs and self.has_video:
-                frames, e = await self._encode_frames_from_vid(image_path, mod_)
-                if frames == ERROR_TOKEN:
-                    await log(f"Error encoding video!: {repr(e)}", 'error')
-                    yield (None, ERROR_TOKEN, None)
-                    return
-                else:
-                    data['messages'][-1]['images'] = frames
-            elif ext in VIDEO_EXTs and not self.has_video:
-                await log(f"Cannot process video file {image_path}: Model {self.name} is not configured for video processing.", 'warn')
-
-        async with self.state_lock:
-            if self.state != BUSY:
-                yield (None, ERROR_TOKEN, None)
-                return
-
-        buffer = ""
+    async def load_context(self):
         try:
-            async with self.session.post(url, headers=headers, data=json.dumps(data)) as response:  # type: ignore
-                response.raise_for_status()
+            async with aiofiles.open(self.context_path) as file:
+                content = await file.read()
+                content = json.loads(content)
+                self.summary = content.get("summary")
+                return content.get("conversation",[])
+        except (FileNotFoundError, json.JSONDecodeError):
+            return []
 
-                if stream:
-                    async for chunk in response.content.iter_any():
+    async def save_context(self):
+        await self.event_manager.emit_async("save_context_started")
+        try:
+            async with self.context_lock:
+                data = {"summary":self.summary, "conversation": self.context}
+                data_to_save = json.dumps(data, indent=2) 
+
+            async with aiofiles.open(self.context_path, "w") as file:
+                await file.write(data_to_save)
+                await self.event_manager.emit_async("save_context_completed")
+        except IOError as e:
+            await log(f"Error saving context: {e}", "error")
+            await self.event_manager.emit_async("save_context_failed", error=str(e))
+
+    async def _test_model(self, url, ollama_name ):
+        try:
+            data = {
+            "model": ollama_name,
+            "messages": [{"role": "user", "content": "hi"}],
+            "stream": True,
+            }
+            headers = {"Content-Type": "application/json"}
+
+            async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=2)) as session:
+                async with session.post(f"{url}/api/chat", headers=headers, data=json.dumps(data)) as res:
+                    res.raise_for_status()
+                    buffer = ""
+                    async for chunk in res.content.iter_any():
                         buffer += chunk.decode("utf-8")
                         while "\n" in buffer:
                             line, buffer = buffer.split("\n", 1)
-                            line = line.strip()
-                            if not line:
-                                continue
-                            if self.generation_cancelled:
-                                await response.release()
-                                break
-                            try:
-                                json_line = json.loads(line)
+                            if line.strip():
+                                try:
+                                    json.loads(line.strip())
+                                    return True
+                                except json.JSONDecodeError:
+                                    continue
+        except (aiohttp.ClientError, json.JSONDecodeError) as e:
+            return False
 
-                                thinking_chunk = json_line.get("message", {}).get("thinking", "")
-                                content_chunk = json_line.get("message", {}).get("content", "")
-                                tools_chunk = json_line.get("message", {}).get("tool_calls", []) 
-                                yield (thinking_chunk, content_chunk, tools_chunk)
+    async def _ping_model_tag(self, url):
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.get(f"{url}/api/tags") as res:
+                    return res.status == 200
+        except aiohttp.ClientError:
+                return False
 
-                            except json.JSONDecodeError:
-                                continue
-                        if self.generation_cancelled:
-                            await response.release()
+    async def check_models(self, interval=10):
+        cooldowns = {name: 0 for name in self.models}
+
+        while True:
+            for name, model in self.models.items():
+                if model.state in ["down", "shutting down", "warming up"]:
+                    continue
+
+                if cooldowns[name] > 0:
+                    cooldowns[name] -= 1
+                    continue
+
+                is_alive = await self._ping_model_tag(model.host)
+                
+                is_terminated = model.process.poll() is not None if model.process else True
+
+                if not is_alive:
+                    await log(f"CRITICAL: {model.name} API is down. Restarting...", "error")
+                    cooldowns[name] = 5
+                    await model.warm_up()
+
+                elif is_terminated:
+                    model.state = "idle" 
+            
+            await asyncio.sleep(interval)
+          
+
+    async def summarise_context(self, context = None, max_nums = 20, model_role = 'summarizer', keep_nums = 10, save_context = False):  
+        if context is None:  
+            async with self.context_lock:  
+                context = list(self.context)  
+  
+        model = self.models.get(model_role)  
+        if model:  
+            
+            if len(context) >= max_nums:  
+                given_context = list(context[:max_nums-keep_nums])  
+                text = '\n'  
+                for t in given_context:  
+                    role = t['role']  
+                    content = t['content']  
+  
+                    if role != 'tool':  
+                        text += f"{role} : {content}\n"  
+  
+                text = f"(user/assistant messages below are the ONLY new information)\nOutput ONLY the updated summary text. No commentary.\n<NEW_CONVERSATION> \n{text}\n </NEW_CONVERSATION>"  
+                system = self.system_prompts.get('summarizer', f'''This is a conversation log. Produce a factual, neutral summary.\n'  
+                                                       'Do your only job properly: SUMMARIZE THE GIVEN CONVERSATION.'   
+                                                       "Do ****NOT**** try to be helpful and answer the given query, just summarise the given conversation. Output ONLY the updated summary text. No commentary.''')  
+  
+                if self.summary: text = f"Below is the previous rolling summary of the conversation.\nIt represents persisted memory.\nUpdate it ONLY if the new conversation content adds facts or contradicts it.\nIf nothing changes, reproduce it verbatim.\n\n<PREVIOUS_SUMMARY>\n{self.summary}\n</PREVIOUS_SUMMARY>" + text  
+  
+                entry = None  
+                try:  
+                    async for (_, out, _ )in model.generate(text, [], stream=False, system_prompt_override=system):  
+                        if out != ERROR_TOKEN and (out and isinstance(out, str) and out.strip()):  
+  
+                            entry = out
+  
+                except Exception as e:  
+                    await log(f"Error during summarization: {e}", "error")  
+  
+                if entry: 
+                    self.summary = entry  
+                    context = context[-keep_nums:]  
+                if save_context:  
+                    async with self.context_lock:  
+                        self.context = context  
+                        await self.event_manager.emit_async("save_context_requested")  
+  
+                # TODO: Trim the context to remove older entries if needed explicitly  
+ 
+                return context
+
+    async def cancel_generation(self):
+        model = task = False
+        
+        if self.active_model:
+            self.active_model.cancel()
+            model = True
+
+        if self.generation_task:
+            if not self.generation_task.done():
+                self.generation_task.cancel()
+                task = True
+                try:
+                    await self.generation_task
+                except asyncio.CancelledError:
+                    pass
+
+        if model:
+            await log("Model loop aborted", "info")
+
+        if task:
+            await log("Streaming task aborted", "info")
+            
+        if task and model: await log('Generation camcelled by user', 'info')
+
+    async def generate(self, query, stream: None | bool = None, manual_routing=False, think=None, image_path=None):
+        async with self.context_lock:
+            context = list(self.context)
+        query, model_name = await self.router.route_query(query, context, manual_routing) if self.router else (query, self.default_role)
+        if not model_name: 
+            model_name = self.default_role
+
+        model = self.models[model_name]
+
+        if stream is None:
+            stream = self.platform not in STREAM_DISABLED
+
+        await log(f"Using stream={stream} for {model_name}", "info")
+
+        content_final = ""
+        thinking_final = ""
+        tools_called = None
+       
+        if self.summary: context.insert(0, {"role": "assistant", "content": f"[PERSISTED MEMORY – NOT DIALOGUE]\n[INTERNAL MEMORY — DO NOT REPEAT — NOT PART OF CONVERSATION]\nThe system generated summary of previous messages/turns. **Do NOT** treat this as the part of the conversation. For reference only. \n<SUMMARY>\n{self.summary}\n</SUMMARY>"}) # role:system is fatal.
+
+        await self.event_manager.emit_async("generation_started", model_name=model_name, query=query)
+
+
+        if stream:
+            queue = asyncio.Queue()
+            async def producer():
+                try:
+                    async for (thinking_chunk, content_chunk, tools_chunk) in model.generate(query, context, True,think=think, image_path=image_path):
+                        if content_chunk == ERROR_TOKEN:
                             break
-                else:
-                    res_json = await response.json()
-                    thinking = res_json.get("message", {}).get("thinking", "")
-                    content = res_json.get("message", {}).get("content", "")
-                    tools = res_json.get("message", {}).get("tool_calls", [])
-                    yield (thinking, content, tools)
+                        await queue.put((thinking_chunk, content_chunk, tools_chunk))
+                except asyncio.CancelledError:
+                    raise
+                finally:
+                    queue.put_nowait(None)
 
-        except Exception as e:
-            await log(f"Ollama API Request Error: {e}", "error")
-            yield (None, ERROR_TOKEN, None)
-        finally:
-            async with self.state_lock:
-                self.generation_cancelled = False
-                if self.state == BUSY:
-                    self.state = IDLE
+            task = asyncio.create_task(producer())
 
+            self.generation_task = task
+            self.active_model = model
+            
+            while True:
+                item = await queue.get()
+                if item is None:
+                    break
+                thinking_chunk, content_chunk, tools_chunk = item
+                thinking_final += thinking_chunk or ""
+                content_final += content_chunk or ""
+                if tools_called is None:
+                    tools_called = []
+                    
+                if tools_chunk:
+                    tools_called.extend(tools_chunk)
 
-    async def shutdown(self):
-        await log(f"Shutting down {self.name}...", "info")
-        async with self.state_lock:
-            if self.state in (DOWN, SHUTTING_DOWN):
-                return
-            self.state = SHUTTING_DOWN
+                await self.event_manager.emit_async("generation_chunk", model_name=model_name, thinking_chunk=thinking_chunk, content_chunk=content_chunk)
 
-        if self.session is not None:
+                yield (thinking_chunk or "", content_chunk or "")
+        
+            await task            
+        else:
+            await log(f"Non-streaming mode active", "info")
+            async for (thinking, content, tools) in model.generate(query, context, False, think=think, image_path=image_path):
+                await log(f"Got non-streaming response chunk", "info")
+                if content == ERROR_TOKEN:
+                    break
+
+                thinking_final = thinking or ""
+                content_final = content or ""
+                tools_called = tools
+                await self.event_manager.emit_async("generation_chunk", model_name=model_name, thinking_chunk=thinking, content_chunk=content)
+                yield (thinking_final, content_final)
+
+        await self.event_manager.emit_async("generation_completed", model_name=model_name, query=query, final_thinking=thinking_final, final_content=content_final, tools_called=tools_called)
+        context = await self.summarise_context(save_context = False)       
+        async with self.context_lock:
+            if context: self.context = context
+            if query and query.strip(): 
+                self.context.append({'role': 'user', 'content': query})
+                
+            self.context.append({'role': 'assistant', 'thinking': thinking_final, 'content': content_final, 'tool_calls': tools_called})
+        
+        self.active_model = None
+        self.generation_task = None
+
+        await self.event_manager.emit_async("execute_tools_requested", tools=tools_called) # too lazy to update self.context here.
+       
+        await self.event_manager.emit_async_block("save_context_requested") # just extra safe. 
+
+    async def execute_tools(self, tools):
+        results = {}
+        if not tools:
+            return results
+
+        for tool in tools:
+            if not isinstance(tool, dict) or 'function' not in tool:
+                await log(f"Invalid tool format: {tool}", "warn")
+                continue
+
+            await log(f"Executing tool: {tool['function'].get('name')}", "info")    
+            tool_name = tool['function'].get('name')
+            tool_idx = tool['function'].get('index')
+            tool_args = tool['function'].get('arguments', {})
+
+            if not tool_name in self.tools_regis.keys():
+                await log(f"{tool_name} is not in the registory. Skipping...", 'warn')
+                continue
+
+            tool_instance = self.tools_regis.get(tool_name)
+            if not isinstance(tool_instance, Tool):
+                await log(f"Found no matching `Tool` instance for {tool_name}. Skipping...", 'warn')
+                continue
+
+            result = await tool_instance.execute(**tool_args)
+            results[tool_idx] = result
+
+            async with self.context_lock:
+                    self.context.append(
+                    {'role':'tool', 'tool_name':tool_name, 'content':str(results[tool_idx])}
+                    )
+            if isinstance(tool_instance, Tool): await self.event_manager.emit_async("tool_executed", tool = tool_instance)
+            await self.event_manager.emit_async_block("save_context_requested")
+
+        return results
+
+    async def shut_down(self):
+        await log("Shutting Down all services...", "info")
+        await self.event_manager.stop_event()
+        
+        for task in list(self.running_tasks):
+            task.cancel()
             try:
-                url = f'{self.host}{self._get_endpoint()}'
-                await self.session.post(url, json={'model': self.ollama_name, 'keep_alive': 0})
-            except Exception:
-                pass 
-            await asyncio.sleep(0.5) # wait for the request to be processed
-            try:
-                await self.session.close()
-            except:
+                await task
+            except asyncio.CancelledError:
                 pass
-            self.session = None
 
-        if self.process is not None:
-            pid = self.process.pid
-            await log(f"Killing process tree for {self.name} (PID {pid})...", "info")
+        for model in self.models.values():
+            await model.shutdown()
 
-            try: # you can call me paranoid. I AM paranoid.
-                self.process.terminate() 
-                await asyncio.to_thread(self.process.wait, timeout=5)
-            except subprocess.TimeoutExpired:
-                self.process.kill()
-            except Exception as e:
-                await log(f"Error terminating process for {self.name}: {e}", "error")
-
-            try:
-                if sys.platform == "win32":
-                    subprocess.run(["taskkill", "/F", "/T", "/PID", str(pid)], 
-                                   stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-                else:
-                    os.killpg(os.getpgid(pid), SIGKILL)
-            except Exception:
-                pass
-
-            self.process = None
-
-        if hasattr(self, '_log_file') and self._log_file is not None:
-            try:
-                self._log_file.close()
-            except:
-                pass
-            self._log_file = None
-
-        async with self.state_lock:
-            self.state = DOWN
-        await log(f"{self.name} shutdown complete.", "success")
+        await self.save_context()
+        print("Done.")
