@@ -40,7 +40,7 @@ class Model:
         self.custom_keep_alive_timeout = "5m"
         self.use_mmap = False
         self.has_video = False
-        self.available_roles= [] # ONLY accessed by the router model
+        self.available_roles = [] # ONLY accessed by the router model
         self.tools = []
         self.state = IDLE
         self.state_lock = asyncio.Lock()
@@ -118,7 +118,7 @@ class Model:
     def add_to_available_roles(self, *roles):
         roles = list(roles)
         self.available_roles.extend(roles)
-        self.available_roles= list(set(self.available_roles)) # order doesn't matter 
+        self.available_roles = list(set(self.available_roles)) # order doesn't matter 
 
     async def warm_up(
         self,
@@ -246,6 +246,7 @@ class Model:
                 response.raise_for_status()
                 try:
                     resp = await response.json()
+                    await log(f"Raw non-streaming chunk: {resp}", 'info')
                 except Exception as e:
                     await log(f"Failed to load model's response while non streaming: {repr(e)}", 'error')
                     raise Exception(f"Failed to load model's response while non streaming: {repr(e)}")
@@ -277,7 +278,7 @@ class Model:
             except Exception as e:
                     await log(f"Failed to load model's response while streaming: {repr(e)}", 'error')
                     raise Exception(f"Failed to load model's response while streaming: {repr(e)}")
-                    
+
             self.warmed_up = True
             await log(f"{self.name} ({self.ollama_name}) warmed up!", "success")
 
@@ -304,17 +305,17 @@ class Model:
 
     def cancel(self):
         self.generation_cancelled = True
-    
+
     async def generate(self, query: str, context: list[dict], stream: bool, think: str | bool | None = False, image_path: None | str = None, 
-                       mod_ = 1, system_prompt_override: str | None = None):
-        
+                   mod_ = 1, system_prompt_override: str | None = None):
+
         async with self.state_lock:
             if self.state != IDLE:
                 await log(f"{self.name} is busy", "warn")
                 yield (None, ERROR_TOKEN, None)
                 return
             self.state = BUSY
-
+            self.generation_cancelled = False
 
         await log(f"Generating response from {self.name}...", "info")
 
@@ -323,7 +324,6 @@ class Model:
 
         if not self.session or self.session.closed:
             self.session = aiohttp.ClientSession()
-
 
         messages = []
         if system_prompt_override is None:
@@ -345,14 +345,13 @@ class Model:
         if self.role.lower() == 'router':
             if len(self.available_roles) < 1:
                 await log("No role provided", "error") 
-                raise  Exception("No role provided")
-
+                raise Exception("No role provided")
 
             data["format"] = {
                 "type": "object",
                 "properties": {
                     "role": {"type": "string", "enum": self.available_roles, "description": "Selected role or model"}
-                }, # I'll add more
+                },
                 "required": ["role"]
                 }
         elif self.has_tools:
@@ -390,56 +389,70 @@ class Model:
             elif ext in VIDEO_EXTs and not self.has_video:
                 await log(f"Cannot process video file {image_path}: Model {self.name} is not configured for video processing.", 'warn')
 
-        async with self.state_lock:
-            if self.state != BUSY:
-                yield (None, ERROR_TOKEN, None)
-                return
-
         buffer = ""
         try:
-            async with self.session.post(url, headers=headers, data=json.dumps(data)) as response:  # type: ignore
+            timeout = aiohttp.ClientTimeout(total=None)
+            async with self.session.post(url, headers=headers, data=json.dumps(data), timeout=timeout) as response:
                 response.raise_for_status()
 
                 if stream:
-                    async for chunk in response.content.iter_any():
-                        buffer += chunk.decode("utf-8")
-                        while "\n" in buffer:
-                            line, buffer = buffer.split("\n", 1)
-                            line = line.strip()
-                            if not line:
-                                continue
+                    try:
+                        async for raw_chunk in response.content.iter_chunked(1024):
+
                             if self.generation_cancelled:
-                                await response.release()
+                                await log(f"Cancellation requested for {self.name}, breaking stream", "info")
                                 break
-                            try:
-                                json_line = json.loads(line)
 
-                                thinking_chunk = json_line.get("message", {}).get("thinking", "")
-                                content_chunk = json_line.get("message", {}).get("content", "")
-                                tools_chunk = json_line.get("message", {}).get("tool_calls", []) 
-                                yield (thinking_chunk, content_chunk, tools_chunk)
+                            chunk = raw_chunk.decode("utf-8", errors='ignore')
+                            buffer += chunk
 
-                            except json.JSONDecodeError:
-                                continue
-                        if self.generation_cancelled:
-                            await response.release()
-                            break
+                            while "\n" in buffer and not self.generation_cancelled:
+                                line, buffer = buffer.split("\n", 1)
+                                line = line.strip()
+                                if not line:
+                                    continue
+
+                                try:
+                                    json_line = json.loads(line)
+                                    thinking_chunk = json_line.get("message", {}).get("thinking", "")
+                                    content_chunk = json_line.get("message", {}).get("content", "")
+                                    tools_chunk = json_line.get("message", {}).get("tool_calls", []) 
+                                    yield (thinking_chunk, content_chunk, tools_chunk)
+                                except json.JSONDecodeError:
+                                    continue
+
+                            if self.generation_cancelled:
+                                break
+
+                    except asyncio.CancelledError:
+                        await log(f"Generation cancelled for {self.name}", "info")
+                        raise
+
                 else:
-                    res_json = await response.json()
-                    thinking = res_json.get("message", {}).get("thinking", "")
-                    content = res_json.get("message", {}).get("content", "")
-                    tools = res_json.get("message", {}).get("tool_calls", [])
-                    yield (thinking, content, tools)
+                    try:
+                        res_json = await response.json()
+                        thinking = res_json.get("message", {}).get("thinking", "")
+                        content = res_json.get("message", {}).get("content", "")
+                        tools = res_json.get("message", {}).get("tool_calls", [])
+                        yield (thinking, content, tools)
+                    except asyncio.CancelledError:
+                        await log(f"Non-stream generation cancelled for {self.name}", "info")
+                        raise
+
+        except asyncio.CancelledError:
+            await log(f"Request cancelled for {self.name}", "info")
+            yield (None, ERROR_TOKEN, None)
+            raise
 
         except Exception as e:
             await log(f"Ollama API Request Error: {e}", "error")
             yield (None, ERROR_TOKEN, None)
+
         finally:
             async with self.state_lock:
                 self.generation_cancelled = False
                 if self.state == BUSY:
                     self.state = IDLE
-
 
     async def shutdown(self):
         await log(f"Shutting down {self.name}...", "info")
