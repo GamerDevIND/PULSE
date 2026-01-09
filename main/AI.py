@@ -250,11 +250,11 @@ class AI:
             if not self.generation_task.done():
                 self.generation_task.cancel()
                 task = True
-                self.generation_task = None
                 try:
                     await self.generation_task
                 except asyncio.CancelledError:
                     pass
+                self.generation_task = None
 
         if model:
             await log("Model loop aborted", "info")
