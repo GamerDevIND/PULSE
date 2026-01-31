@@ -5,8 +5,9 @@ import subprocess
 import aiohttp
 import aiofiles
 import av
-from .utils import log, Tool
-from .configs import ERROR_TOKEN, VIDEO_EXTs, IMAGE_EXTs
+from .utils import log
+from .tools import Tool
+from .configs import VIDEO_EXTs, IMAGE_EXTs, ERROR_TOKEN
 import base64
 from io import BytesIO
 import sys
@@ -104,7 +105,7 @@ class Model:
             return frames, None
         except Exception as e:
             await log(f"Error in video frame encoding for {self.name}: {e}", 'error')
-            return ERROR_TOKEN, e
+            return ERROR_TOKEN, repr(e)
 
     async def _encode_image(self, image_path):
         try:
@@ -113,7 +114,7 @@ class Model:
             base64_image = base64.b64encode(image_data).decode("utf-8")
             return base64_image, None
         except Exception as e:
-            return ERROR_TOKEN, e
+            return ERROR_TOKEN, repr(e)
 
     def add_to_available_roles(self, *roles):
         roles = list(roles)
@@ -312,7 +313,7 @@ class Model:
         async with self.state_lock:
             if self.state != IDLE:
                 await log(f"{self.name} is busy", "warn")
-                yield (None, ERROR_TOKEN, None)
+                yield (ERROR_TOKEN, ERROR_TOKEN, [])
                 return
             self.state = BUSY
             self.generation_cancelled = False
@@ -332,7 +333,7 @@ class Model:
         else:
             messages.append({'role': "system", 'content': system_prompt_override})
 
-        messages += context + [{"role": "user", "content": query}]
+        if query and query.strip(): messages += context + [{"role": "user", "content": query}]
 
         headers = {"Content-Type": "application/json"}
 
@@ -374,7 +375,7 @@ class Model:
                 image, e = await self._encode_image(image_path)
                 if image == ERROR_TOKEN:
                     await log(f"Error encoding image!: {repr(e)}", 'error')
-                    yield (None, ERROR_TOKEN, None)
+                    yield (ERROR_TOKEN, ERROR_TOKEN, [])
                     return
                 else:
                     data['messages'][-1]['images'] = [image]
@@ -382,7 +383,7 @@ class Model:
                 frames, e = await self._encode_frames_from_vid(image_path, mod_)
                 if frames == ERROR_TOKEN:
                     await log(f"Error encoding video!: {repr(e)}", 'error')
-                    yield (None, ERROR_TOKEN, None)
+                    yield (ERROR_TOKEN, ERROR_TOKEN, [])
                     return
                 else:
                     data['messages'][-1]['images'] = frames
@@ -422,11 +423,12 @@ class Model:
                                     continue
 
                             if self.generation_cancelled:
+                                await response.release()
                                 break
 
                     except asyncio.CancelledError:
                         await log(f"Generation cancelled for {self.name}", "info")
-                        raise
+                        return 
 
                 else:
                     try:
@@ -437,16 +439,16 @@ class Model:
                         yield (thinking, content, tools)
                     except asyncio.CancelledError:
                         await log(f"Non-stream generation cancelled for {self.name}", "info")
-                        raise
+                        return 
 
         except asyncio.CancelledError:
             await log(f"Request cancelled for {self.name}", "info")
-            yield (None, ERROR_TOKEN, None)
-            raise
+            yield (ERROR_TOKEN, ERROR_TOKEN, [])
+            return
 
         except Exception as e:
             await log(f"Ollama API Request Error: {e}", "error")
-            yield (None, ERROR_TOKEN, None)
+            yield (ERROR_TOKEN, ERROR_TOKEN, [])
 
         finally:
             async with self.state_lock:
