@@ -201,6 +201,8 @@ the model takes the formed "thing" and predicts what should come next using prob
 
 3. **Etc**: it's not over yet i just lack the knowledge and too lazy to search it
 
+4. **Current LLMs**: Most modern LLMs are decoder only, meaning the "encoder" is just the embedding layer and the model just predicts the next token based on previously generated ones.
+
 ---
 
 # End note:
