@@ -97,7 +97,7 @@ class ToolRegistry:
        error, result = await tool.execute(**args)
 
        if error == ERROR_TOKEN:
-           await log(f"An error occurred while trying to execute Tool: {tool.name}}\nMessage:{result}", "error")
+           await log(f"An error occurred while trying to execute Tool: {tool.name}\nMessage:{result}", "error")
            result = f"An error occurred while trying to execute Tool: {tool.name}}\nMessage:{result}"
 
       data = {"role": "tool", "tool_name": tool.name, "content": result} # docs are suggesting to to use str(result)
