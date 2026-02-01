@@ -198,7 +198,7 @@ class AI:
             query, model_name = await self.router.route_query(query, context, manual_routing) if self.router else (query, self.default_role)
             if not model_name: 
                 model_name = self.default_role
-
+            if image_path: model_name = "vision"
             model = self.models[model_name]
             self.active_model = model
 
