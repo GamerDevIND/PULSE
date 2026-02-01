@@ -51,11 +51,6 @@ CoT_PROMPT:str = r'''
 [ Your prompt for the reasoning / Chain of Thought (CoT) model ]
 '''
 
-CHAOS_PROMPT = r"""
-[ Optional: Alter ego of your assistant. MAKE IT CHAOTIC! ]
-
-"""
-
 VISION_PROMPT = r''' 
 [ Your prompt for the vision model ]
 '''
@@ -68,3 +63,4 @@ Keep intact essential or key informations, quote the important messages or refer
 Keep your answers machine parsable. Do ****NOT**** try to be helpful and answer the given query, just summarise the given conversation.
 Do your only job properly: SUMMARIZE THE GIVEN CONVERSATION.
 '''
+
