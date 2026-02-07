@@ -3,8 +3,9 @@ import signal
 import sys
 import os
 import colorama
+import pathlib
 
-sys.path.append(os.path.dirname(os.path.abspath(__file__)) + "/..")
+sys.path.append(str(pathlib.Path(__file__).parent.parent))
 
 from main.AI import AI
 from main.utils import log
@@ -12,26 +13,11 @@ from main.utils import log
 colorama.init()
 
 async def main():
-    ai = AI("main/Models_config.json")
+    ai = AI("main/Models_config_test.json")
     await ai.init("cli")
 
     loop = asyncio.get_running_loop()
     shutdown_event = asyncio.Event()
-
-    @ai.event_manager.on("generation_chunk")
-    async def handle_chunk(content_chunk, thinking_chunk, **kwargs):
-        if thinking_chunk:
-            print(f"{colorama.Fore.LIGHTBLACK_EX}{thinking_chunk}{colorama.Style.RESET_ALL}", end="", flush=True)
-        if content_chunk:
-            print(content_chunk, end="", flush=True)
-
-    @ai.event_manager.on("tool_executed")
-    async def handle_tool(tool_name, result, **kwargs):
-        pass
-
-    @ai.event_manager.on("save_context_completed")
-    async def handle_save(**kwargs):
-        pass
 
     async def shutdown():
         if not shutdown_event.is_set():
@@ -69,10 +55,16 @@ async def main():
 
         try:
             async for (thinking, response) in ai.generate(req, manual_routing=False, image_path=image_path):
-                pass # do whatever you want with the chunks 
-
+                if thinking:
+                    print(f"{colorama.Fore.LIGHTBLACK_EX}{thinking}{colorama.Style.RESET_ALL}", end="", flush=True)
+                if response:
+                    print(response, end="", flush=True)
+            
             print()
-
+         
+        except KeyboardInterrupt:
+            await ai.cancel_generation()
+            print(f"{colorama.Fore.RED}Generation cancelled{colorama.Style.RESET_ALL}")
         except Exception as e:
             await log(f"Main loop error: {e}", "error")
             if not shutdown_event.is_set():
