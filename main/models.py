@@ -1,17 +1,21 @@
 import os
-import json
 import asyncio
-import subprocess
 import aiohttp
 import aiofiles
 import av
+import json
+from typing import Literal, Type
 from .utils import log
 from .tools import Tool
-from .configs import VIDEO_EXTs, IMAGE_EXTs, ERROR_TOKEN
+from .configs import IMAGE_EXTs, VIDEO_EXTs, ERROR_TOKEN
 import base64
 from io import BytesIO
 import sys
-from signal import SIGKILL
+if sys.platform != 'win32':
+    from signal import SIGKILL
+else:
+    SIGKILL = 9
+
 import inspect
 
 IDLE = "idle"
@@ -28,24 +32,18 @@ class Model:
         self.has_tools = has_tools
         self.has_CoT = has_CoT
         self.has_vision = has_vision
+        self.router_role = "router"
         self.port = port
+        self.host =  "localhost:11434"
         self.system = system_prompt
-        self.host = f"http://localhost:{self.port}"
-        self.start_command = ["ollama", "serve"]
-        self.ollama_env = os.environ.copy()
-        self.ollama_env["OLLAMA_HOST"] = self.host
         self.warmed_up = False
-        self.session: aiohttp.ClientSession | None = None
-        self.process = None
-        self.use_custom_keep_alive_timeout = False
-        self.custom_keep_alive_timeout = "5m"
-        self.use_mmap = False
         self.has_video = False
         self.available_roles = [] # ONLY accessed by the router model
         self.tools = []
-        self.state = IDLE
-        self.state_lock = asyncio.Lock()
         self.generation_cancelled = False
+        self.session: aiohttp.ClientSession | None = None
+        self.state_lock = asyncio.Lock()
+        self.state = DOWN
 
     async def __aenter__(self):
         await self.warm_up()
@@ -56,6 +54,13 @@ class Model:
 
     def _get_endpoint(self) -> str:
         return "/api/chat"
+
+    async def change_state(self, new, use_lock = True):
+        if use_lock:
+            async with self.state_lock: 
+                self.state = new
+        else:
+            self.state = new
 
     async def wait_until_ready(self, url: str, timeout: int = 30):
         await log(f"Waiting for {self.name} on {url}...", "info")
@@ -68,26 +73,20 @@ class Model:
                             return
             except (aiohttp.ClientError, asyncio.TimeoutError) as e:
                 await log(f"Retries: {i+1} / {timeout}", "info")
-
-                if self.process is not None and self.process.poll() is not None:
-                    try:
-                        if hasattr(self, '_log_file') and self._log_file is not None and hasattr(self._log_file, 'name'):
-                            self._log_file.flush()
-                            try:
-                                async with aiofiles.open(self._log_file.name, 'r') as lf:
-                                    content = await lf.read()
-                                    tail = '\n'.join(content.splitlines()[-30:])
-                                    await log(f"{self.name} process terminated. Recent logs:\n{tail}", 'error')
-                            except (FileNotFoundError, PermissionError, OSError) as log_e:
-                                await log(f"Could not read log file for {self.name}: {log_e}", 'error')
-                    except (OSError, AttributeError) as proc_e:
-                        await log(f"Error checking process status for {self.name}: {proc_e}", 'error')
             await asyncio.sleep(1)
         raise TimeoutError(f"🟥 Ollama server for {self.name} did not start in time.")
+
+    async def init(self): 
+        raise NotADirectoryError
 
     async def _encode_frames_from_vid(self, video_path, mod_ = 1):
         if not self.has_vision:
             return [], None
+        ext = os.path.splitext(video_path)[1].lower()
+        if ext not in VIDEO_EXTs:
+            await log(f"{video_path} has file extenstion {ext} which isn't supported for video input", 'error')
+            return ERROR_TOKEN, f"{video_path} has file extenstion {ext} which isn't supported for video input"
+        
         try:
             container = av.open(video_path)
             frames = []
@@ -108,6 +107,10 @@ class Model:
             return ERROR_TOKEN, repr(e)
 
     async def _encode_image(self, image_path):
+        ext = os.path.splitext(image_path)[1].lower()
+        if ext not in IMAGE_EXTs:
+            await log(f"{image_path} has file extenstion {ext} which isn't supported for image input", 'error')
+            return ERROR_TOKEN, f"{image_path} has file extenstion {ext} which isn't supported for image input"
         try:
             async with aiofiles.open(image_path, "rb") as image_file:
                 image_data = await image_file.read()
@@ -128,169 +131,8 @@ class Model:
         use_custom_keep_alive_timeout=False,
         custom_keep_alive_timeout: str = "5m",
         has_video_processing=False,
-        warmup_video_path="main/test.mp4",):
-        async with self.state_lock:
-            if self.state not in (IDLE, DOWN):
-                raise RuntimeError(f"{self.name} cannot warm up from state={self.state}")
-            self.state = WARMING_UP
-
-        try:
-            self.use_custom_keep_alive_timeout = use_custom_keep_alive_timeout
-            self.custom_keep_alive_timeout = custom_keep_alive_timeout
-            self.use_mmap = use_mmap
-            self.has_video = has_video_processing
-
-            is_actually_alive = False
-            try:
-                async with aiohttp.ClientSession(
-                    timeout=aiohttp.ClientTimeout(total=2)
-                ) as session:
-                    async with session.get(f"{self.host}/api/tags") as res:
-                        if res.status == 200:
-                            is_actually_alive = True
-            except Exception:
-                pass
-
-            if is_actually_alive:
-                if not self.session or self.session.closed:
-                    self.session = aiohttp.ClientSession()
-                self.warmed_up = True
-                await log(f"{self.name} is already alive on {self.host}. Re-linked.", "success")
-                return
-            if self.warmed_up and self.process and self.process.poll() is None:
-                await log(
-                    f"{self.name} process already running and warmed. Skipping restart.",
-                    "success",
-                )
-                return
-
-            log_dir = os.path.join("main", "logs")
-            os.makedirs(log_dir, exist_ok=True)
-            log_file_path = os.path.join(log_dir, f"{self.ollama_name}.log")
-
-            f = open(log_file_path, "w")
-            self._log_file = f
-
-            creationflags = (
-                subprocess.CREATE_NEW_PROCESS_GROUP if sys.platform == "win32" else 0
-            )
-            start_new_session = sys.platform != "win32"
-
-            self.process = subprocess.Popen(
-                self.start_command,
-                env=self.ollama_env,
-                stderr=subprocess.STDOUT,
-                stdout=f,
-                creationflags=creationflags,
-                start_new_session=start_new_session,
-            )
-
-            await self.wait_until_ready(self.host)
-
-            if not self.session:
-                self.session = aiohttp.ClientSession()
-
-            data = {
-                "model": self.ollama_name,
-                "messages": [{"role": "user", "content": "hi"}],
-                "stream": False,
-            }
-
-            headers = {"Content-Type": "application/json"}
-            endpoint = self._get_endpoint()
-            url = f"{self.host}{endpoint}"
-
-            options = {}
-            if self.use_mmap:
-                options["use_mmap"] = True
-            if self.use_custom_keep_alive_timeout:
-                options["keep_alive"] = self.custom_keep_alive_timeout
-
-            if self.role.lower() == 'router':
-                if len(self.available_roles) < 1:
-                    await log("No role provided", "error") 
-                    raise Exception("No role provided")
-                data["format"] = {
-                    "type": "object",
-                    "properties": {
-                        "role": {"type": "string", "enum": self.available_roles, "description": "Selected role or model"}
-                    }, # I'll add more
-                    "required": ["role"]
-                }
-
-            if self.has_vision:
-                if self.has_video and os.path.exists(warmup_video_path):
-                    await log("Warming up with video frame extraction...", 'info')
-                    encoded_frames, e = await self._encode_frames_from_vid(warmup_video_path, mod_=10)
-                    if encoded_frames == ERROR_TOKEN:
-                        await log(f"Error encoding video frames for warmup: {e}", 'error')
-                        raise Exception(f"Error encoding video frames for warmup: {e}")
-                    if encoded_frames:
-                        if "messages" in data:
-                            data['messages'][-1]['images'] = encoded_frames
-                elif os.path.exists(warmup_image_path):
-                    await log("Warming up with static image...", 'info')
-                    encoded_image, e = await self._encode_image(warmup_image_path)
-                    if encoded_image == ERROR_TOKEN:
-                        await log(f"Error encoding image for warmup!: {e}", 'error')
-                        raise Exception(f"Error encoding image for warmup!: {e}")
-                    else:
-                        if "messages" in data:
-                            data['messages'][-1]['images'] = [encoded_image]
-                else:
-                    await log("Vision model, but no video processing enabled and no warmup image / video found. Skipping vision test.", 'warn')
-
-            data["options"] = options
-
-            await log('Trying Non-Streaming...' ,'info')
-            async with self.session.post(url, headers=headers, data=json.dumps(data)) as response:  # type: ignore
-                response.raise_for_status()
-                try:
-                    resp = await response.json()
-                    await log(f"Raw non-streaming chunk: {resp}", 'info')
-                except Exception as e:
-                    await log(f"Failed to load model's response while non streaming: {repr(e)}", 'error')
-                    raise Exception(f"Failed to load model's response while non streaming: {repr(e)}")
-
-            data['stream'] = True
-
-            await log('Trying Streaming...' ,'info')
-            buffer = ""
-            try:
-                async with self.session.post(url, headers=headers, data=json.dumps(data)) as response:  # type: ignore
-                    response.raise_for_status()
-
-                    async for chunk in response.content.iter_any():
-                        buffer += chunk.decode("utf-8")
-                        while "\n" in buffer:
-                            line, buffer = buffer.split("\n", 1)
-                            line = line.strip()
-                            if not line:
-                                continue
-                            try:
-                                json_line = json.loads(line)
-
-                                _ = json_line.get("message", {}).get("thinking", "")
-                                _ = json_line.get("message", {}).get("content", "")
-                                _ = json_line.get("message", {}).get("tool_calls", []) 
-                                await log(f"Raw streaming chunk: {json_line}", 'info')
-                            except json.JSONDecodeError:
-                                continue
-            except Exception as e:
-                    await log(f"Failed to load model's response while streaming: {repr(e)}", 'error')
-                    raise Exception(f"Failed to load model's response while streaming: {repr(e)}")
-
-            self.warmed_up = True
-            await log(f"{self.name} ({self.ollama_name}) warmed up!", "success")
-
-        except Exception:
-            self.warmed_up = False
-            raise
-
-        finally:
-            async with self.state_lock:
-                self.state = IDLE if self.warmed_up else DOWN
-
+        warmup_video_path="main/test.mp4", router_role = "router"): 
+        raise NotImplementedError
 
     async def add_tools(self, *tool_dicts):
         for tool in tool_dicts:
@@ -299,27 +141,36 @@ class Model:
             elif isinstance(tool, dict):
                 self.tools.append(tool)
             elif callable(tool) and not inspect.isclass(tool):
-                tool = Tool(tool, 'silent')
+                needs_regeneration:bool = False
+                retry: Literal["none", "always", ] = "none"
+                max_retries: int = 0
+                retry_on: tuple[Type[Exception], ...] | None = None
+                visible_to_user: bool = True
+                metadata = {
+                    "needs_regeneration": needs_regeneration,
+                    "retry": retry,
+                    "max_retries": max_retries,
+                    "retry_on": retry_on or (),
+                    "visible_to_user": visible_to_user,
+                }
+                tool = Tool(tool, metadata)
                 self.tools.append(tool.schema)
             else:
                 await log(f"No valid type dectected for: {tool}", 'warn')
 
     def cancel(self):
         self.generation_cancelled = True
-
+    
     async def generate(self, query: str, context: list[dict], stream: bool, think: str | bool | None = False, image_path: None | str = None, 
                    mod_ = 1, system_prompt_override: str | None = None):
 
-        async with self.state_lock:
-            if self.state != IDLE:
-                await log(f"{self.name} is busy", "warn")
-                yield (ERROR_TOKEN, ERROR_TOKEN, [])
-                return
-            self.state = BUSY
-            self.generation_cancelled = False
+        raise NotImplementedError
 
-        await log(f"Generating response from {self.name}...", "info")
+    async def shutdown(self):
+        raise NotImplementedError
 
+    async def _generator(self, query: str, context: list[dict], stream: bool, think: str | bool | None = False, image_path: None | str = None, 
+                   mod_ = 10, system_prompt_override: str | None = None, options : dict | None = None) :
         endpoint = self._get_endpoint()
         url = f"{self.host}{endpoint}"
 
@@ -343,7 +194,7 @@ class Model:
             "stream": stream
         }
 
-        if self.role.lower() == 'router':
+        if self.role.lower() == self.router_role:
             if len(self.available_roles) < 1:
                 await log("No role provided", "error") 
                 raise Exception("No role provided")
@@ -357,12 +208,7 @@ class Model:
                 }
         elif self.has_tools:
             data["tools"] = self.tools
-
-        options = {}
-        if self.use_mmap:
-            options["use_mmap"] = True
-        if self.use_custom_keep_alive_timeout:
-            options["keep_alive"] = self.custom_keep_alive_timeout
+    
         if options:
             data["options"] = options
 
@@ -399,20 +245,20 @@ class Model:
                 if stream:
                     try:
                         async for raw_chunk in response.content.iter_chunked(1024):
-
+                           
                             if self.generation_cancelled:
                                 await log(f"Cancellation requested for {self.name}, breaking stream", "info")
                                 break
-
+                            
                             chunk = raw_chunk.decode("utf-8", errors='ignore')
                             buffer += chunk
-
+                            
                             while "\n" in buffer and not self.generation_cancelled:
                                 line, buffer = buffer.split("\n", 1)
                                 line = line.strip()
                                 if not line:
                                     continue
-
+                                
                                 try:
                                     json_line = json.loads(line)
                                     thinking_chunk = json_line.get("message", {}).get("thinking", "")
@@ -425,11 +271,11 @@ class Model:
                             if self.generation_cancelled:
                                 await response.release()
                                 break
-
+                                
                     except asyncio.CancelledError:
                         await log(f"Generation cancelled for {self.name}", "info")
                         return 
-
+                        
                 else:
                     try:
                         res_json = await response.json()
@@ -445,67 +291,7 @@ class Model:
             await log(f"Request cancelled for {self.name}", "info")
             yield (ERROR_TOKEN, ERROR_TOKEN, [])
             return
-
+            
         except Exception as e:
             await log(f"Ollama API Request Error: {e}", "error")
             yield (ERROR_TOKEN, ERROR_TOKEN, [])
-
-        finally:
-            async with self.state_lock:
-                self.generation_cancelled = False
-                if self.state == BUSY:
-                    self.state = IDLE
-
-    async def shutdown(self):
-        await log(f"Shutting down {self.name}...", "info")
-        async with self.state_lock:
-            if self.state in (DOWN, SHUTTING_DOWN):
-                return
-            self.state = SHUTTING_DOWN
-
-        if self.session is not None:
-            try:
-                url = f'{self.host}{self._get_endpoint()}'
-                await self.session.post(url, json={'model': self.ollama_name, 'keep_alive': 0})
-            except Exception:
-                pass 
-            await asyncio.sleep(0.5) # wait for the request to be processed
-            try:
-                await self.session.close()
-            except:
-                pass
-            self.session = None
-
-        if self.process is not None:
-            pid = self.process.pid
-            await log(f"Killing process tree for {self.name} (PID {pid})...", "info")
-
-            try: # you can call me paranoid. I AM paranoid.
-                self.process.terminate() 
-                await asyncio.to_thread(self.process.wait, timeout=5)
-            except subprocess.TimeoutExpired:
-                self.process.kill()
-            except Exception as e:
-                await log(f"Error terminating process for {self.name}: {e}", "error")
-
-            try:
-                if sys.platform == "win32":
-                    subprocess.run(["taskkill", "/F", "/T", "/PID", str(pid)], 
-                                   stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-                else:
-                    os.killpg(os.getpgid(pid), SIGKILL)
-            except Exception:
-                pass
-
-            self.process = None
-
-        if hasattr(self, '_log_file') and self._log_file is not None:
-            try:
-                self._log_file.close()
-            except:
-                pass
-            self._log_file = None
-
-        async with self.state_lock:
-            self.state = DOWN
-        await log(f"{self.name} shutdown complete.", "success")

@@ -1,13 +1,16 @@
 from .utils import log
 from .configs import ERROR_TOKEN
 import json
-from .models import Model
+from .models import DOWN
+from .model_instance import LocalModel
+from .models_profile import RemoteModel
 
 class Router:
-    def __init__(self, model: Model | None, fallback_role, *available_roles, manual_prefix="!"):
+    def __init__(self, model: RemoteModel | LocalModel | None, fallback_role, *available_roles, manual_prefix="!", auto_warmup=False):
           self.model = model
           self.fallback_role = fallback_role
           self.available_roles = set(available_roles)
+          self.auto_warmup = auto_warmup
           self.manual_prefix = manual_prefix
 
     async def route_query(self, query: str, context, manual: bool | None):
@@ -15,13 +18,22 @@ class Router:
             if not self.model:
                 await log("Router model not configured. Using default.", "error")
                 return query, self.fallback_role
+            
+            if not self.model.warmed_up or self.model.state == DOWN:
+                await log("Router model is not warmed up or down", 'warn')
+                if self.auto_warmup:
+                    await log("Warming up router model", 'info')
+                    await self.model.warm_up()
+                else:
+                    await log("Please warm up the router model first", 'info')
+                    return query, self.fallback_role
 
             router_resp_parts = []
 
             if not set(self.available_roles).issubset(set(self.model.available_roles)):
                 self.model.add_to_available_roles(*self.available_roles)
 
-            async for _, part, _ in self.model.generate(query, context, stream=False):
+            async for _, part, _ in self.model.generate(query=query, context=context, stream=False):
                 if part == ERROR_TOKEN:
                     await log("Router API call failed. Using default.", "error")
                     return query, self.fallback_role
@@ -46,7 +58,7 @@ class Router:
                 return query, selected_role
             else:
                 await log(f"Router selected unknown role or failed to parse ('{selected_role}'). Using default '{self.fallback_role}'.", "warn")
-
+       
                 return query, self.fallback_role
         else:
             return await self.parse_query(query)
@@ -63,9 +75,9 @@ class Router:
             return query, "chaos"
         elif query.startswith(f"{self.manual_prefix}vision"):
             query = query.removeprefix(f"{self.manual_prefix}vision").strip()
-
+ 
             return query, "vision"
         else:
             await log(f"No or incorrect prefix, using default '{self.fallback_role}'", "info")
-
+              
             return query, self.fallback_role

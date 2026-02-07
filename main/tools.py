@@ -2,14 +2,14 @@ from .utils import convert_funcs, log
 from .configs import ERROR_TOKEN
 import inspect 
 
-from typing import Literal, Tuple, Type
+from typing import Literal, Type
 
 def tool(
     *,
     needs_regeneration:bool = False,
-    retry: Literal["none", "always", ] = "none", # I'll add more.
+    retry: Literal["none", "always", ] = "none",
     max_retries: int = 0,
-    retry_on: Tuple[Type[Exception], ...] | None = None,
+    retry_on: tuple[Type[Exception], ...] | None = None,
     visible_to_user: bool = True,
 ):
     def decor(func):
@@ -21,7 +21,7 @@ def tool(
             "visible_to_user": visible_to_user,
         }
         func.__meta__ = metadata
-        ToolRegis.register(func, metadata)
+        ToolRegistry.register(func, metadata)
         return func
     return decor
 
@@ -33,16 +33,17 @@ class Tool:
         self.needs_regeneration:bool = meta["needs_regeneration"]
         self.max_retry = meta["max_retries"]
         self.retry_on = meta["retry_on"]
+        self.retry = meta['retry']
         self.visible_to_user = meta["visible_to_user"]
 
     async def execute(self, **args):
         retries = 0
         error = f"An error occurred executing {self.name}" # fallback 
-        retry_on = tuple(self.retry_on) or () # just in case it's a list or other iterable 
+        retry_on = tuple(self.retry_on) or ()
         if len(retry_on) < 1:
             try:
                 await log(f"{self.name} has 0 retries exceptions set, updating to Exception retry fallback", "warn")
-            finally: pass # idc if logging failed or not.
+            finally: pass
             retry_on = retry_on or (Exception,)
 
         total_attempts = self.max_retry + 1
@@ -58,7 +59,7 @@ class Tool:
 
             except retry_on as e:
                 if self.retry == "none": return ERROR_TOKEN, repr(e)
-                retries += 1 # I'll add more checks later for more retry types.
+                retries += 1
                 error = repr(e)
             except Exception as e: return ERROR_TOKEN, repr(e)
         return ERROR_TOKEN, error
@@ -72,37 +73,40 @@ class ToolRegistry:
 
     def __init__(self):
         self.tools = ToolRegistry._tools.copy()
-
+ 
 
     def clear(self):
         self.tools.clear()
-
+     
     def clear_global(self):
         ToolRegistry._tools.clear()
 
     def list_tools(self):
         return list(self.tools.values())
+    
+    def list_tools_global(self):
+        return list(ToolRegistry._tools.values())
 
-    async def execute_tool(self, **args, tool:Tool | None = None, tool_name:str | None = None):
+    async def execute_tool(self,tool:Tool | None = None, tool_name:str | None = None, **args):
         if tool_name and tool is None: tool = self.tools.get(tool_name)
         if tool_name and tool: 
             if tool_name != tool.name: 
                 await log("Tool and provided tool name do not match. Skipping this item.", "warn")
                 return
 
-       if not tool:
+        if not tool:
            await log("tool not found / provided. skipping execution", "warn")
-           return 
+           return
 
-       error, result = await tool.execute(**args)
+        error, result = await tool.execute(**args)
 
-       if error == ERROR_TOKEN:
+        if error == ERROR_TOKEN:
            await log(f"An error occurred while trying to execute Tool: {tool.name}\nMessage:{result}", "error")
            result = f"An error occurred while trying to execute Tool: {tool.name}\nMessage:{result}"
 
-      data = {"role": "tool", "tool_name": tool.name, "content": result} # docs are suggesting to to use str(result)
-
-      return data, tool
+        data = {"role": "tool", "tool_name": tool.name, "content": result}
+      
+        return data, tool
 
     def get(self, name):
         if name not in self.tools: raise Exception(f"{name} not available in the registry.")

@@ -3,66 +3,67 @@ from .configs import ERROR_TOKEN
 import json 
 import asyncio
 import aiofiles 
-import os 
-from .models import Model, DOWN
+from .models import DOWN
+from .model_instance import LocalModel
+from .models_profile import RemoteModel
 
 class ContextManager:
-     def __init__(self, context_path, summary_model:Model | None, summary_max_nums = 20, summary_keep_nums = 10,):
-         self.context_path = context_path
-         self.summary_model = summary_model
-         self.summary_max_nums = summary_max_nums
-         self.summary_keep_nums = summary_keep_nums
+    def __init__(self, context_path, summary_model: LocalModel | RemoteModel | None, summary_max_nums = 20, summary_keep_nums = 10,):
+        self.context_path = context_path
+        self.summary_model = summary_model
+        self.summary_max_nums = summary_max_nums
+        self.summary_keep_nums = summary_keep_nums
+         
+        self.summary = None
+        self.context = []
 
-         self.summary = None
-         self.context = []
-
-         self.lock = asyncio.Lock()
+        self.lock = asyncio.Lock()
 
         self.queue = asyncio.Queue()
         self.summary_task = None
+        
+    async def append(self, data:dict | list[dict] | tuple[dict]): 
+        if type(data) == dict:
+            await self.queue.put(data)
+        elif type(data) in [list, tuple]:
+            for d in data: await self.queue.put(d)
+        else: await log("unknown data type, skipping item.", "warn")
+ 
+    async def add_and_maintain(self, data:dict | list[dict] | tuple[dict]):
+        await self.append(data)
+             
+        await self.flush_queue()
+        await self.maybe_summarise_context(None, True)
+        await self.save()
 
-     async def append(self, data:dict | list[dict] | tuple[dict]): 
-         if type(data) == dict:
-             await self.queue.put(data)
-         elif type(data) in [list, tuple]:
-             for d in data: await self.queue.put(d)
-          else: log("unknown data type, skipping item.", "warn")
+    async def flush_queue(self):
+        items = []
+         
+        while not self.queue.empty():
+            item = await self.queue.get()
+            items.append(item)
+        async with self.lock:
+            self.context.extend(items)
 
-     async def add_and_maintain(self, data:dict | list[dict] | tuple[dict]):
-         await self.append(data)
+    async def get_context(self):
+        async with self.lock:
+            return list(self.context)
 
-         await self.flush_queue()
-         await self.maybe_summarise_context(None, True)
-         await self.save()
+    def get_summary(self):
+        return str(self.summary) if self.summary else None
+ 
+    async def shut_down(self):        
+        await self.flush_queue()
+        await self.save()
+        await log("Context saved and context manager shut down.", "info")
 
-     async def flush_queue(self):
-         items = []
-
-         while not self.queue.empty():
-             item = await self.queue.get()
-             items.append(item)
-         async with self.lock:
-             self.context.extend(items)
-
-     async def get_context(self):
-         async with self.lock:
-             return list(self.context)
-
-     def get_summary(self):
-         return str(self.summary) if self.summary else None
-
-     async def shut_down(self):        
-         await self.flush_queue()
-         await self.save()
-         await log("Context saved and context manager shut down.", "info")
-
-     async def maybe_summarise_context(self, context=None, save_context= False, summary_system_prompt = None, auto_warm_up = False):
+    async def maybe_summarise_context(self, context=None, save_context= False, summary_system_prompt = None, auto_warm_up = False):
         if context is None:  
             await self.flush_queue()
             async with self.lock: 
                 context = list(self.context)  
-        if auto_warm_up and self.summary_model.state == DOWN: await self.summary_model.warm_up()
-        if not isinstance(self.summary_model, Model): 
+        if auto_warm_up and self.summary_model and self.summary_model.state == DOWN: await self.summary_model.warm_up()
+        if not isinstance(self.summary_model, (RemoteModel, LocalModel)): 
             await log("Summarising model not set. please provide a summarising model before summarising.", "error")
             raise Exception("Summarising model not set. please provide a summarising model before summarising.")
         if len(context) >= self.summary_max_nums:  
@@ -107,7 +108,7 @@ class ContextManager:
 
             return context
 
-     async def load(self):
+    async def load(self):
         try:
             async with aiofiles.open(self.context_path) as file:
                 content = await file.read()
@@ -128,6 +129,6 @@ class ContextManager:
 
             async with aiofiles.open(self.context_path, "w") as file:
                 await file.write(data_to_save)
-
+                
         except IOError as e:
             await log(f"Error saving context: {e}", "error")
