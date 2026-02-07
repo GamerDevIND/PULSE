@@ -65,7 +65,7 @@ class ContextManager:
         if auto_warm_up and self.summary_model and self.summary_model.state == DOWN: await self.summary_model.warm_up()
         if not isinstance(self.summary_model, (RemoteModel, LocalModel)): 
             await log("Summarising model not set. please provide a summarising model before summarising.", "error")
-            raise Exception("Summarising model not set. please provide a summarising model before summarising.")
+            return 
         if len(context) >= self.summary_max_nums:  
             given_context = list(context[:self.summary_max_nums - self.summary_keep_nums])  
             text = '\n'  
