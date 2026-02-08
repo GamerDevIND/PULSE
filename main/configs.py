@@ -13,6 +13,9 @@ CHAT_PROMPT = r"""
 [ Your prompt for the chat model ]
 """
 
+CHAOS_PROMPT = r""" 
+[ Your prompt for the chat model for the chaos mode override. You can make it unhinged, that's upto you.]
+"""
 
 ROUTER_PROMPT = r"""
 You are a deterministic routing assistant.
