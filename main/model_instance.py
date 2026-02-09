@@ -57,7 +57,7 @@ class LocalModel(Model):
         async with self.state_lock:
             if self.state not in (IDLE, DOWN):
                 raise RuntimeError(f"{self.name} cannot warm up from state={self.state}")
-            
+
         await self.change_state(WARMING_UP)
 
         try:
@@ -138,7 +138,7 @@ class LocalModel(Model):
                 if len(available_roles) < 1:
                     await log("No role provided. Testing with fallback roles.", "error")
                     available_roles = ["chat", 'cot']
-                    
+
                 data["format"] = {
                     "type": "object",
                     "properties": {
@@ -208,7 +208,7 @@ class LocalModel(Model):
             except Exception as e:
                     await log(f"Failed to load model's response while streaming: {repr(e)}", 'error')
                     raise Exception(f"Failed to load model's response while streaming: {repr(e)}")
-                    
+
             self.warmed_up = True
             await log(f"{self.name} ({self.ollama_name}) warmed up!", "success")
 
@@ -218,10 +218,10 @@ class LocalModel(Model):
 
         finally: 
             await self.change_state(IDLE if self.warmed_up else DOWN)
-    
+
     async def generate(self, query: str, context: list[dict], stream: bool, think: str | bool | None = False, image_path: None | str = None, 
                    mod_ = 10, system_prompt_override: str | None = None):
-    
+
         async with self.state_lock:
             if self.state != IDLE:
                 await log(f"{self.name} is busy", "warn")
@@ -282,12 +282,10 @@ class LocalModel(Model):
                 await log(f"Error terminating process for {self.name}: {e}", "error")
 
             try:
-                if sys.platform == 'win32':
-                    os.kill(pid, SIGKILL)
-                else:
-                    os.killpg(os.getpgid(pid), SIGKILL)
-            except Exception:
-                pass
+                if sys.platform == 'win32': subprocess.run(['taskkill', '/F', '/T', '/PID', str(pid)], 
+                       stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                else: os.killpg(os.getpgid(pid), SIGKILL)
+            except Exception:pass
 
             self.process = None
 
