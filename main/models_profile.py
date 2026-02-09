@@ -1,5 +1,4 @@
-import aiohttp
-from typing import AsyncGenerator
+import aiohttp
 from .models import Model, WARMING_UP, DOWN, BUSY, SHUTTING_DOWN, IDLE
 from .utils import log
 
@@ -49,7 +48,7 @@ class RemoteModel(Model):
             await self.change_state(IDLE if self.warmed_up else DOWN)
 
     async def generate(self, query: str, context: list[dict], stream: bool, think: str | bool | None = False, image_path: None | str = None, 
-                   mod_ = 10, system_prompt_override: str | None = None)  -> AsyncGenerator:
+                   mod_ = 10, system_prompt_override: str | None = None):
         await log(f"Generating response from {self.name}...", "info")
         await self.change_state(BUSY)
         async for chunk in self._generator(query, context, stream, think, image_path, mod_, system_prompt_override):
