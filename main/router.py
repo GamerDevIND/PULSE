@@ -72,7 +72,7 @@ class Router:
             return query, "cot"
         elif query.startswith(f"{self.manual_prefix}chaos"):
             query = query.removeprefix(f"{self.manual_prefix}chaos").strip()
-            return query, "chat"
+            return query, "chaos"
         elif query.startswith(f"{self.manual_prefix}vision"):
             query = query.removeprefix(f"{self.manual_prefix}vision").strip()
  
