@@ -34,7 +34,7 @@ class Model:
         self.has_vision = has_vision
         self.router_role = "router"
         self.port = port
-        self.host =  "localhost:11434"
+        self.host = f"http://localhost:{self.port}"
         self.system = system_prompt
         self.warmed_up = False
         self.has_video = False
