@@ -79,7 +79,7 @@ class Model:
     async def init(self): 
         raise NotADirectoryError
 
-    async def _encode_frames_from_vid(self, video_path, mod_ = 1):
+    async def _encode_frames_from_vid(self, video_path, mod_ = 1, format = "JPEG"):
         if not self.has_vision:
             return [], None
         ext = os.path.splitext(video_path)[1].lower()
@@ -98,7 +98,7 @@ class Model:
                 if i % mod_ == 0:
                     img = frame.to_image() # type: ignore
                     buffer = BytesIO()
-                    img.save(buffer, format="PNG")
+                    img.save(buffer, format=format)
                     frame_b64 = base64.b64encode(buffer.getvalue()).decode("utf-8")
                     frames.append(frame_b64)
             return frames, None
