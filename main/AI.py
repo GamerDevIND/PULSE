@@ -16,9 +16,10 @@ from .configs import (
     STREAM_DISABLED,
     VISION_PROMPT,
     SUMMARIZER_PROMPT,
+    CHAOS_PROMPT,
     ERROR_TOKEN
 )
-    
+
 class AI:
     def __init__(self, model_config_path="main/Models_config.json", context_path="main/saves/context.json", 
                  mode:Literal['single'] | Literal['multi'] = "single" , max_turns = 5,absolute_max_turns = 50,):
@@ -85,7 +86,7 @@ class AI:
 
         for t in self.backend.running_tasks:
             self.running_tasks.add(t)
-    
+
     async def _ask_user_consent(self):
         if not self.regen_consent_callback: return False
         true_calls = [True, 1, "1" ,"true", "y", "yes", "consent", "confirm",]
@@ -123,16 +124,16 @@ class AI:
                 else: 
                     self.regen = False
                     return False
-                
+
     async def cancel_generation(self):
         self.regen = False
 
         if not self.backend:
             await log("No backend provided!", 'error')
             return
-        
+
         await self.backend.cancel_generation()
-            
+
         await log('Generation cancelled by user', 'info')
 
     async def run_generation_loop(self, query, stream: None | bool = None, manual_routing=False, think=None, image_path=None):
@@ -152,7 +153,10 @@ class AI:
             query, role = await self.router.route_query(query, context, manual_routing) if self.router else (query, self.default_role)
             if not role: 
                 role = self.default_role
+            system = CHAOS_PROMPT if role == "chaos" else None
 
+
+            role = "chat" if role == "chaos" else role
             if stream is None:
                 stream = self.platform not in STREAM_DISABLED
 
@@ -161,14 +165,13 @@ class AI:
             tools_called = []
 
             summary = self.context_manager.get_summary()
-       
+
             if summary: context.insert(0, {"role": "assistant", "content": f"[PERSISTED MEMORY - NOT DIALOGUE]\n[INTERNAL MEMORY — DO NOT REPEAT — NOT PART OF CONVERSATION]\nThe system generated summary of previous messages/turns. **Do NOT** treat this as the part of the conversation. For reference only. \n<SUMMARY>\n{summary}\n</SUMMARY>"}) # role:system is fatal.
 
-            async for (thinking_chunk, content_chunk, tools_chunk) in self.backend.generate(role, query, context, stream, 
-                                                                                            think, image_path, mod_=video_frames_mod):
+            async for (thinking_chunk, content_chunk, tools_chunk) in self.backend.generate(role, query, context, stream,                                                                                           think, image_path, system_prompt_override=system, mod_=video_frames_mod):
                     thinking_final += thinking_chunk or ""
                     content_final += content_chunk or ""
-                    
+
                     if tools_chunk:
                         tools_called.extend(tools_chunk)
 
@@ -176,7 +179,7 @@ class AI:
 
             if query and query.strip(): 
                 await self.context_manager.append({'role': 'user', 'content': query})
-                
+
             await self.context_manager.add_and_maintain({'role': 'assistant', 'thinking': thinking_final, 'content': content_final, 'tool_calls': tools_called})
 
             await self.execute_tools(tools_called)
@@ -187,21 +190,21 @@ class AI:
         tools_objs = []  
         if not tools:  
             return results  
-  
+
         for tool in tools:  
             if not isinstance(tool, dict) or 'function' not in tool:  
                 await log(f"Invalid tool format: {tool}", "warn")  
                 continue  
-  
+
             await log(f"Executing tool: {tool['function'].get('name')}", "info")      
             tool_name = tool['function'].get('name')  
             tool_idx = tool['function'].get('index')  
             tool_args = tool['function'].get('arguments', {})  
-  
+
             if not tool_name in self.tools_regis.tools.keys():  
                 await log(f"{tool_name} is not in the registory. Skipping...", 'warn')  
                 continue  
-  
+
             result = await self.tools_regis.execute_tool(tool_name=tool_name, **tool_args)
             if result is None:
                 await log(f"An error occured in the tools execution; Tool Name: {tool_name}", 'warn')
@@ -211,7 +214,7 @@ class AI:
             result["index"] = tool_idx  
             results.append(result)  
             tools_objs.append(tool_obj)  
-          
+
         await self.context_manager.append(results) 
         await self._check_regen(tools_objs)   
         return results
