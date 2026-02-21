@@ -12,7 +12,7 @@ from main.utils import log
 colorama.init()
 
 async def main():
-    ai = AI("main/Models_config_test.json")
+    ai = AI("main/Models_config.json")
     await ai.init("cli")
 
     loop = asyncio.get_running_loop()
@@ -109,4 +109,5 @@ if __name__ == "__main__":
     try:
         asyncio.run(main())
     except KeyboardInterrupt:
+
         pass
