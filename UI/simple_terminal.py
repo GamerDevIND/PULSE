@@ -24,7 +24,7 @@ async def main():
             shutdown_event.set()
             print("\nShutting down AI services...")
             await ai.shut_down()
-            exit()
+            
 
     sigint_state = {"count": 0, "last": 0.0}
     SIGINT_WINDOW = 3.0
