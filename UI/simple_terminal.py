@@ -66,7 +66,7 @@ async def main():
             else:
                 signal.signal(sig, lambda *_: asyncio.create_task(shutdown()))
 
-    # If stdin is not a TTY (non-interactive), keep running and wait for signals.
+    
     if not sys.stdin.isatty():
         await log("No TTY detected — running headless; waiting for signals.", "info")
         await shutdown_event.wait()
