@@ -32,6 +32,8 @@ PULSE IS:
 
 Oh, by the way I added tool calling (function calling).
 
+And Single Server mode is still experimental. Expect unpredictable behaviour.
+
 ---
 
 # TECH STUFF (because sadly this shit needs to work):
