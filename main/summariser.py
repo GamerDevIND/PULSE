@@ -27,7 +27,7 @@ class Summariser:
             await self.model.warm_up()
         if not isinstance(self.model, (RemoteModel, LocalModel)): 
             await log("Summarising model not set. please provide a summarising model before summarising.", "error")
-            return context, prev_facts, prev_summary
+            return prev_summary, prev_facts, context
 
         if len(context) >= self.summary_max_nums:  
             given_context = list(context[:self.summary_max_nums - self.summary_keep_nums])  
