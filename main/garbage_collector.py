@@ -9,7 +9,7 @@ class GarbageCollector:
         self.time_limit = time_limit
         self.size_threshold_in_mbs = size_threshold_in_mbs * 1024 * 1024
 
-    
+
     async def gc(self, index):
         image_dir_list = os.listdir(self.image_cache_dir)
         image_dir_list = list(map(lambda f: os.path.join(self.image_cache_dir, f), image_dir_list))
@@ -32,12 +32,12 @@ class GarbageCollector:
                 if os.path.exists(data['path']):
                     await asyncio.to_thread(os.remove, data['path'])
                 keys_to_delete.append(hash_key)
-            
+
             elif data['size'] > self.size_threshold_in_mbs and (now - data['last_used']) > (self.time_limit // 2):
                 if os.path.exists(data['path']):
                     await asyncio.to_thread(os.remove, data['path'])
                 keys_to_delete.append(hash_key)
-            
+
         for k in keys_to_delete:
             del index[k]
 
@@ -46,7 +46,7 @@ class GarbageCollector:
         current_size = sum(item['size'] for item in index.values())
         if current_size > global_size_threshold:
             sorted_keys = sorted(index.keys(), key=lambda k: index[k]['last_used'])
-            
+
             for k in sorted_keys:
                 if current_size <= global_size_threshold:
                     break
