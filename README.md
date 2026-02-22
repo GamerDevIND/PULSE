@@ -1,6 +1,6 @@
 # P.U.L.S.E.
 
-Personal Unified Logic System Entity
+Personal Unified Logic System Entity (V1.1)
 
 # WHAT THE FUCK ON EARTH IS THIS PIECE OF SHIT?:
 
