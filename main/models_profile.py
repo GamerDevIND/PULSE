@@ -32,6 +32,9 @@ class RemoteModel(Model):
 
         await self._warmer(use_mmap=use_mmap, custom_keep_alive_timeout="-1", use_custom_keep_alive_timeout=True, has_video_processing=has_video_processing, 
                            warmup_image_path=warmup_image_path,warmup_video_path=warmup_video_path)
+        # Ensure state is IDLE after warmup
+        if self.warmed_up:
+            await self.change_state(IDLE)
 
     async def generate(self, query: str, context: list[dict], stream: bool, think: str | bool | None = False, image_path: None | str = None, 
                    mod_ = 10, system_prompt_override: str | None = None, options: dict | None = None, format: dict | None = None):
@@ -53,16 +56,17 @@ class RemoteModel(Model):
                     'options': {'keep_alive': 0}
                 }
                 if self.session:
-                    async with self.session.post(url, json=payload) as resp:
+                    async with self.session.post(url, json=payload, timeout=aiohttp.ClientTimeout(total=2)) as resp:
                         resp.raise_for_status()
             except Exception:
                 pass 
-                
-            await asyncio.sleep(0.2) 
+
+            await asyncio.sleep(0.5) 
             try:
                 if self.session:
                     await self.session.close()
-            except:
+                    await asyncio.sleep(0.5)  # Allow connector cleanup
+            except Exception:
                 pass
             self.session = None
         await log(F"{self.name} shutting down success", 'info')
