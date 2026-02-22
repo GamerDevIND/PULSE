@@ -64,4 +64,4 @@ VISION_PROMPT = r'''
 
 
 # Your prompt for the summariser. Keep it empty or set to None to use the default one.
-SUMMARIZER_PROMPT = None
+SUMMARIZER_PROMPT = ""
