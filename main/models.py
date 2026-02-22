@@ -37,7 +37,7 @@ class Model:
         self.system = system_prompt
         self.warmed_up = False
         self.has_video = False
-        
+
         self.tools = []
         self.generation_cancelled = False
         self.session: aiohttp.ClientSession | None = None
@@ -122,8 +122,8 @@ class Model:
         self,
         use_mmap=False,
         warmup_image_path="main/test.jpg",
-        use_custom_keep_alive_timeout=False,
-        custom_keep_alive_timeout: str = "5m",
+        use_custom_keep_alive_timeout=True,
+        custom_keep_alive_timeout: str = "-1",
         has_video_processing=False,
         warmup_video_path="main/test.mp4", router_role = "router"): 
         raise NotImplementedError
@@ -300,7 +300,7 @@ class Model:
         try:
             if not self.session:
                 self.session = aiohttp.ClientSession()
-            
+
             await self.wait_until_ready(self.host)
 
             data = {
@@ -318,7 +318,7 @@ class Model:
             if use_custom_keep_alive_timeout:
                 options["keep_alive"] = custom_keep_alive_timeout
 
-            
+
             if self.has_vision:
                     if self.has_video and os.path.exists(warmup_video_path):
                         await log("Warming up with video frame extraction...", 'info')
@@ -380,7 +380,7 @@ class Model:
             except Exception as e:
                     await log(f"Failed to load model's response while streaming: {repr(e)}", 'error')
                     raise Exception(f"Failed to load model's response while streaming: {repr(e)}")
-                    
+
             self.warmed_up = True
             await log(f"{self.name} ({self.ollama_name}) warmed up!", "success")
 
