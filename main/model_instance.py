@@ -19,8 +19,7 @@ class LocalModel(Model):
         self.start_command = ["ollama", "serve"]
         self.ollama_env = os.environ.copy()
         self.ollama_env["OLLAMA_HOST"] = self.host
-        self.ollama_env["OLLAMA_MAX_LOADED_MODELS"] = "15"
-        self.ollama_env["OLLAMA_NUM_PARALLEL"] = "15"
+      
         self.warmed_up = False
         self.process = None
         self.use_custom_keep_alive_timeout = True
