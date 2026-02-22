@@ -16,7 +16,7 @@ class Summariser:
             "summary": {"type": "string", "description": "The detailed summary of the given conversation and potiential previous summary for narrative continuity."},
             "facts": {"type": "array", "items": {"type": "string"}, "description": """The facts about the user retrieved from the given conversation and potiential previous summary. 
                       For persona modeling. Retrieve only facts explictly stated. Keep each item short and to the point, you're allowed to generated multiple COMPLETE facts."""},
-            
+
             },
             "required": ["summary", "facts",]
           }
@@ -28,7 +28,7 @@ class Summariser:
         if not isinstance(self.model, (RemoteModel, LocalModel)): 
             await log("Summarising model not set. please provide a summarising model before summarising.", "error")
             return context, prev_facts, prev_summary
-        
+
         if len(context) >= self.summary_max_nums:  
             given_context = list(context[:self.summary_max_nums - self.summary_keep_nums])  
             summary = None
