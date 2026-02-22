@@ -15,10 +15,8 @@ class RemoteModel(Model):
         self.session: aiohttp.ClientSession | None = None
         self.port = port
         self.host = f"http://localhost:{self.port}"
-        self.router_role = "router"
         self.system = system_prompt
         self.has_video = False
-        self.available_roles = [] # ONLY accessed by the router model
         self.tools = []
 
     async def warm_up(
@@ -65,7 +63,7 @@ class RemoteModel(Model):
             try:
                 if self.session:
                     await self.session.close()
-                    await asyncio.sleep(0.5)  # Allow connector cleanup
+                    await asyncio.sleep(0.5)  
             except Exception:
                 pass
             self.session = None
