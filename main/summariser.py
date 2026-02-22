@@ -1,7 +1,7 @@
 from .model_instance import LocalModel
 from .models import DOWN
 from .models_profile import RemoteModel
-from .configs import ERROR_TOKEN
+from .configs import ERROR_TOKEN, SUMMARIZER_PROMPT
 from .utils import log
 import json
 
@@ -21,7 +21,7 @@ class Summariser:
             "required": ["summary", "facts",]
           }
 
-    async def maybe_summarise_context(self, context, prev_summary = None, prev_facts = None, summary_system_prompt = None, auto_warm_up = False):
+    async def maybe_summarise_context(self, context, prev_summary = None, prev_facts = None, summary_system_prompt = SUMMARIZER_PROMPT, auto_warm_up = False):
         await log("Summarising started", 'info')
         if auto_warm_up and self.model and self.model.state == DOWN: 
             await self.model.warm_up()
@@ -43,7 +43,7 @@ class Summariser:
             <NEW_CONVERSATION>
                 {text}
             </NEW_CONVERSATION>"""  
-            system = summary_system_prompt or ( 
+            system = self.model.system or summary_system_prompt or ( 
             "This is a conversation log. Produce a factual, neutral summary.\n"
             "Your only job: summarize.\n"
             "Do NOT answer questions.\n"
