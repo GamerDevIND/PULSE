@@ -1,6 +1,7 @@
 import asyncio
 import signal
 import sys
+import os
 import colorama
 import pathlib
 
@@ -12,7 +13,7 @@ from main.utils import log
 colorama.init()
 
 async def main():
-    ai = AI("main/Models_config.json")
+    ai = AI("main/Models_config_test.json")
     await ai.init("cli")
 
     loop = asyncio.get_running_loop()
@@ -65,12 +66,22 @@ async def main():
             else:
                 signal.signal(sig, lambda *_: asyncio.create_task(shutdown()))
 
+    # If stdin is not a TTY (non-interactive), keep running and wait for signals.
+    if not sys.stdin.isatty():
+        await log("No TTY detected — running headless; waiting for signals.", "info")
+        await shutdown_event.wait()
+        if not shutdown_event.is_set():
+            await shutdown()
+        return
+
     while not shutdown_event.is_set():
         try:
             req = input(">>> ")
         except EOFError:
             req = "/bye"
         except KeyboardInterrupt:
+            # Ignore lone Ctrl+C at prompt to avoid shutting down all models.
+            # Generation cancellation is handled during generation; just continue.
             print()
             continue
 
@@ -93,9 +104,9 @@ async def main():
                     print(f"{colorama.Fore.LIGHTBLACK_EX}{thinking}{colorama.Style.RESET_ALL}", end="", flush=True)
                 if response:
                     print(response, end="", flush=True)
-            
+
             print()
-         
+
         except KeyboardInterrupt:
             await ai.cancel_generation()
             print(f"{colorama.Fore.RED}Generation cancelled{colorama.Style.RESET_ALL}")
@@ -109,5 +120,4 @@ if __name__ == "__main__":
     try:
         asyncio.run(main())
     except KeyboardInterrupt:
-
         pass
