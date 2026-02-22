@@ -29,7 +29,7 @@ class Backend:
 
     async def generate(self, role:str, query:str, context: list[dict], stream: bool, think: str | bool | None = False, image_path: None | str = None, 
                        system_prompt_override=None, mod_ = 10):
-        
+
         if image_path and role != "vision": 
             await log("Image / Video path provided but no vision model chosen. Role changing to Vision.", 'warn')
             role = "vision"
@@ -41,7 +41,7 @@ class Backend:
             await log(f"{role} not found in the model registry!","error")
             yield (ERROR_TOKEN, ERROR_TOKEN, [])
             return
-        
+
         if stream:
             queue = asyncio.Queue(maxsize=256)
             async def producer():
@@ -61,7 +61,7 @@ class Backend:
 
             task = asyncio.create_task(producer())
             self.generation_task = task
-            
+
             while True:
                 item = await queue.get()
                 if item is None:
@@ -69,7 +69,7 @@ class Backend:
                 thinking_chunk, content_chunk, tools_chunk = item
 
                 yield (thinking_chunk or "", content_chunk or "", tools_chunk)
-        
+
             await task            
         else:
             await log(f"Non-streaming mode active", "info")
