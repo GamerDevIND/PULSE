@@ -31,7 +31,7 @@ class MultiServer(Backend):
         except (FileNotFoundError, json.JSONDecodeError) as e:
             print(f"🟥 Error loading models: {e}")
             raise Exception("Models loading failed.", e)
-    
+
     async def async_load(self):
         try:
             async with aiofiles.open(self.models_list_path, 'r', encoding="utf-8") as f:
@@ -48,7 +48,7 @@ class MultiServer(Backend):
         except (FileNotFoundError, json.JSONDecodeError) as e:
             print(f"🟥 Error loading models: {e}")
             raise Exception("Models loading failed.", e)
-        
+
     async def _ping_model_tag(self, url):
         try:
             async with aiohttp.ClientSession() as session:
@@ -56,7 +56,7 @@ class MultiServer(Backend):
                     return res.status == 200
         except aiohttp.ClientError:
                 return False
-    
+
     async def _check_models(self, interval=10):
         cooldowns = {name: 0 for name in self.models}
 
@@ -75,7 +75,7 @@ class MultiServer(Backend):
                     await log(f"CRITICAL: {model.name} API is down. Restarting...", "error")
                     cooldowns[name] = 5
                     await model.warm_up()
-            
+
             await asyncio.sleep(interval)
 
     async def init(self, tools_list:list[Tool]):
