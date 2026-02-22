@@ -23,8 +23,8 @@ class LocalModel(Model):
         self.ollama_env["OLLAMA_NUM_PARALLEL"] = "15"
         self.warmed_up = False
         self.process = None
-        self.use_custom_keep_alive_timeout = False
-        self.custom_keep_alive_timeout = "5m"
+        self.use_custom_keep_alive_timeout = True
+        self.custom_keep_alive_timeout = "-1"
         self.use_mmap = False
 
     async def __aenter__(self):
@@ -38,11 +38,11 @@ class LocalModel(Model):
         self,
         use_mmap=False,
         warmup_image_path="main/test.jpg",
-        use_custom_keep_alive_timeout=False,
-        custom_keep_alive_timeout: str = "5m",
+        use_custom_keep_alive_timeout=True,
+        custom_keep_alive_timeout: str = "-1",
         has_video_processing=False,
         warmup_video_path="main/test.mp4"):
-            
+
         log_dir = os.path.join("main", "logs")
         os.makedirs(log_dir, exist_ok=True)
         log_file_path = os.path.join(log_dir, f"{self.ollama_name}.log")
@@ -79,15 +79,16 @@ class LocalModel(Model):
             if not self.session or self.session.closed:
                 self.session = aiohttp.ClientSession()
             self.warmed_up = True
+            await self.change_state(IDLE)
             await log(f"{self.name} is already alive on {self.host}. Re-linked.", "success")
             return
 
         await self._warmer(use_mmap, warmup_image_path, use_custom_keep_alive_timeout, custom_keep_alive_timeout,
                            has_video_processing, warmup_video_path)
-    
+
     async def generate(self, query: str, context: list[dict], stream: bool, think: str | bool | None = False, image_path: None | str = None, 
                    mod_ = 10, system_prompt_override: str | None = None, options:dict | None = None, format: dict | None = None):
-    
+
         async with self.state_lock:
             if self.state != IDLE:
                 await log(f"{self.name} is busy", "warn")
@@ -117,7 +118,7 @@ class LocalModel(Model):
 
     async def shutdown(self):
         await log(f"Shutting down {self.name}...", "info")
-        
+
         async with self.state_lock:
             if self.state in (DOWN, SHUTTING_DOWN):
                 return
@@ -131,15 +132,16 @@ class LocalModel(Model):
                     'messages': [{'role': 'user', 'content': 'bye'}],
                     'options': {'keep_alive': 0}
                 }
-                async with self.session.post(url, json=payload) as resp:
+                async with self.session.post(url, json=payload, timeout=aiohttp.ClientTimeout(total=2)) as resp:
                     resp.raise_for_status()
             except Exception:
                 pass 
-            
-            await asyncio.sleep(0.2) 
+
+            await asyncio.sleep(0.5) 
             try:
                 await self.session.close()
-            except:
+                await asyncio.sleep(0.5)  # Allow connector cleanup
+            except Exception:
                 pass
             self.session = None
 
@@ -168,7 +170,7 @@ class LocalModel(Model):
                             p.kill()
                         except psutil.NoSuchProcess:
                             pass
-                            
+
             except psutil.NoSuchProcess:
                 await log(f"Process {pid} already terminated.", "debug")
             except Exception as e:
