@@ -73,17 +73,17 @@ class ToolRegistry:
 
     def __init__(self):
         self.tools = ToolRegistry._tools.copy()
- 
+
 
     def clear(self):
         self.tools.clear()
-     
+
     def clear_global(self):
         ToolRegistry._tools.clear()
 
     def list_tools(self):
         return list(self.tools.values())
-    
+
     def list_tools_global(self):
         return list(ToolRegistry._tools.values())
 
@@ -105,7 +105,7 @@ class ToolRegistry:
            result = f"An error occurred while trying to execute Tool: {tool.name}\nMessage:{result}"
 
         data = {"role": "tool", "tool_name": tool.name, "content": result}
-      
+
         return data, tool
 
     def get(self, name):
