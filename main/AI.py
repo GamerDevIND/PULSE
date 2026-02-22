@@ -19,7 +19,7 @@ from .configs import (
     CHAOS_PROMPT,
     FILE_NAME_KEY
 )
-    
+
 class AI:
     def __init__(self, model_config_path="main/Models_config.json", context_path="main/saves/context.json", 
                  mode:Literal['single'] | Literal['multi'] = "multi" , max_turns = 5,absolute_max_turns = 50,):
@@ -88,7 +88,7 @@ class AI:
 
         for t in self.backend.running_tasks:
             self.running_tasks.add(t)
-    
+
     async def _ask_user_consent(self):
         if not self.regen_consent_callback: return False
         true_calls = [True, 1, "1" ,"true", "y", "yes", "consent", "confirm",]
@@ -126,16 +126,16 @@ class AI:
                 else: 
                     self.regen = False
                     return False
-                
+
     async def cancel_generation(self):
         self.regen = False
 
         if not self.backend:
             await log("No backend provided!", 'error')
             return
-        
+
         await self.backend.cancel_generation()
-            
+
         await log('Generation cancelled by user', 'info')
 
     async def run_generation_loop(self, query, stream: None | bool = None, manual_routing=False, think=None, file_path=None):
@@ -180,7 +180,7 @@ class AI:
                     {"\n".join(facts).strip()}
                     </FACTS>
                     """ if facts and "".join(facts).strip() else ''
-       
+
             if summary: context.insert(0, {"role": "assistant", "content": f"""[PERSISTED MEMORY - NOT DIALOGUE]
                                            [INTERNAL MEMORY - DO NOT REPEAT - NOT PART OF CONVERSATION]
 
@@ -195,10 +195,10 @@ class AI:
 
             async for (thinking_chunk, content_chunk, tools_chunk) in self.backend.generate(role, query, context, stream,
                                                 think, file_path, system_prompt_override=system, mod_=video_frames_mod):
-                    
+
                     thinking_final += thinking_chunk or ""
                     content_final += content_chunk or ""
-                    
+
                     if tools_chunk:
                         tools_called.extend(tools_chunk)
 
@@ -206,7 +206,7 @@ class AI:
 
             if query and query.strip(): 
                 await self.context_manager.append({'role': 'user', 'content': query, FILE_NAME_KEY : file_path})
-                
+
             await self.context_manager.add_and_maintain({'role': 'assistant', 'thinking': thinking_final, 'content': content_final, 'tool_calls': tools_called})
 
             await self.execute_tools(tools_called)
@@ -217,21 +217,21 @@ class AI:
         tools_objs = []  
         if not tools:  
             return results  
-  
+
         for tool in tools:  
             if not isinstance(tool, dict) or 'function' not in tool:  
                 await log(f"Invalid tool format: {tool}", "warn")  
                 continue  
-  
+
             await log(f"Executing tool: {tool['function'].get('name')}", "info")      
             tool_name = tool['function'].get('name')  
             tool_idx = tool['function'].get('index')  
             tool_args = tool['function'].get('arguments', {})  
-  
+
             if not tool_name in self.tools_regis.tools.keys():  
                 await log(f"{tool_name} is not in the registory. Skipping...", 'warn')  
                 continue  
-  
+
             result = await self.tools_regis.execute_tool(tool_name=tool_name, **tool_args)
             if result is None:
                 await log(f"An error occured in the tools execution; Tool Name: {tool_name}", 'warn')
@@ -241,7 +241,7 @@ class AI:
             result["index"] = tool_idx  
             results.append(result)  
             tools_objs.append(tool_obj)  
-          
+
         await self.context_manager.append(results) 
         await self._check_regen(tools_objs)   
         return results
@@ -261,4 +261,15 @@ class AI:
             await log("No backend provided! Skipping backend shutdown.", 'error')
 
         await self.context_manager.shut_down()
+
+        if self.backend:
+            for model in self.backend.models.values():
+                if hasattr(model, 'session') and model.session:
+                    try:
+                        model.session = None
+                    except:
+                        pass
+
+        await asyncio.sleep(1.0)
+
         print("Done.")
