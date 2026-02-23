@@ -255,10 +255,12 @@ class Model:
 
                             if self.generation_cancelled:
                                 await response.release()
+                                self.generation_cancelled = False
                                 break
 
                     except asyncio.CancelledError:
                         await log(f"Generation cancelled for {self.name}", "info")
+
                         return 
 
                 else:
@@ -270,16 +272,20 @@ class Model:
                         yield (thinking, content, tools)
                     except asyncio.CancelledError:
                         await log(f"Non-stream generation cancelled for {self.name}", "info")
+
                         return 
 
         except asyncio.CancelledError:
             await log(f"Request cancelled for {self.name}", "info")
-            yield (ERROR_TOKEN, ERROR_TOKEN, [])
+
+            self.generation_cancelled = False          
             return
 
         except Exception as e:
             await log(f"Ollama API Request Error: {e}", "error")
             yield (ERROR_TOKEN, ERROR_TOKEN, [])
+
+        self.generation_cancelled = False
 
     async def _warmer(self,
         use_mmap=False,
