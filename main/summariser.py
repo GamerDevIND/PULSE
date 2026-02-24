@@ -27,7 +27,7 @@ class Summariser:
             await self.model.warm_up()
         if not isinstance(self.model, (RemoteModel, LocalModel)): 
             await log("Summarising model not set. please provide a summarising model before summarising.", "error")
-            return prev_summary, prev_facts, context
+            return context, prev_facts, prev_summary
 
         if len(context) >= self.summary_max_nums:  
             given_context = list(context[:self.summary_max_nums - self.summary_keep_nums])  
@@ -61,6 +61,8 @@ class Summariser:
 
 
             if prev_facts: text = f"Below are the previous facts extracted from the previous conversation turns. Change the facts only when explicitly contradicted or explicitly stated to forget. Do NOT invent facts or context. treat the given conversation aa ground truth.\n Never invent or assume context unless provided in the previous lossy summary or the provided conversation. You're allowed to merge facts only when they explicitly overlap.\n<PREVIOUS_FACTS>\n{prev_facts}\n</PREVIOUS_FACTS>" + text
+
+            text += "\n\nPrefer recent evidence over prior summary."
 
             entry = None  
             try:  
