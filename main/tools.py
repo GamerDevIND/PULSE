@@ -52,7 +52,7 @@ class Tool:
             try:
                 r = self.func(**args)
                 if inspect.isawaitable(r):
-                    await r
+                    r = await r
                     
                 return None, r
 
