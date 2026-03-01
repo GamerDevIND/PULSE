@@ -37,7 +37,7 @@ class Model:
         self.system = system_prompt
         self.warmed_up = False
         self.has_video = False
-
+        
         self.tools = []
         self.generation_cancelled = False
         self.session: aiohttp.ClientSession | None = None
@@ -75,10 +75,7 @@ class Model:
             await asyncio.sleep(1)
         raise TimeoutError(f"🟥 Ollama server for {self.name} did not start in time.")
 
-    async def init(self): 
-        raise NotADirectoryError
-
-    async def _encode_frames_from_vid(self, video_path, mod_ = 1, format = "JPEG"):
+    async def _encode_frames_from_vid(self, video_path, mod_ = 1, format_ = "JPEG"):
         if not self.has_vision:
             return [], None
         ext = os.path.splitext(video_path)[1].lower()
@@ -97,7 +94,7 @@ class Model:
                 if i % mod_ == 0:
                     img = frame.to_image() # type: ignore
                     buffer = BytesIO()
-                    img.save(buffer, format=format)
+                    img.save(buffer, format=format_)
                     frame_b64 = base64.b64encode(buffer.getvalue()).decode("utf-8")
                     frames.append(frame_b64)
             return frames, None
@@ -164,7 +161,7 @@ class Model:
         raise NotImplementedError
 
     async def _generator(self, query: str, context: list[dict], stream: bool, think: str | bool | None = False,file_path: None | str = None, 
-                   mod_ = 10, video_save_buffer_format = "JPEG", system_prompt_override: str | None = None, options : dict | None = None, format: dict | None = None) :
+                   mod_ = 10, video_save_buffer_format = "JPEG", system_prompt_override: str | None = None, options : dict | None = None, format_: dict | None = None) :
         endpoint = self._get_endpoint()
         url = f"{self.host}{endpoint}"
 
@@ -194,8 +191,8 @@ class Model:
         if options:
             data["options"] = options
 
-        if format:
-            data["format"] = format
+        if format_:
+            data["format"] = format_
 
         if self.has_CoT and think is not None:
             data['think'] = think
@@ -211,7 +208,7 @@ class Model:
                 else:
                     data['messages'][-1]['images'] = [image]
             elif ext in VIDEO_EXTs and self.has_video:
-                frames, e = await self._encode_frames_from_vid(video_path=file_path, mod_= mod_, format=video_save_buffer_format)
+                frames, e = await self._encode_frames_from_vid(video_path=file_path, mod_= mod_, format_=video_save_buffer_format)
                 if frames == ERROR_TOKEN:
                     await log(f"Error encoding video!: {repr(e)}", 'error')
                     yield (ERROR_TOKEN, ERROR_TOKEN, [])
@@ -260,7 +257,7 @@ class Model:
 
                     except asyncio.CancelledError:
                         await log(f"Generation cancelled for {self.name}", "info")
-
+                        
                         return 
 
                 else:
@@ -272,12 +269,12 @@ class Model:
                         yield (thinking, content, tools)
                     except asyncio.CancelledError:
                         await log(f"Non-stream generation cancelled for {self.name}", "info")
-
+                        
                         return 
 
         except asyncio.CancelledError:
             await log(f"Request cancelled for {self.name}", "info")
-
+           
             self.generation_cancelled = False          
             return
 
@@ -306,7 +303,7 @@ class Model:
         try:
             if not self.session:
                 self.session = aiohttp.ClientSession()
-
+            
             await self.wait_until_ready(self.host)
 
             data = {
@@ -324,7 +321,7 @@ class Model:
             if use_custom_keep_alive_timeout:
                 options["keep_alive"] = custom_keep_alive_timeout
 
-
+            
             if self.has_vision:
                     if self.has_video and os.path.exists(warmup_video_path):
                         await log("Warming up with video frame extraction...", 'info')
@@ -386,7 +383,7 @@ class Model:
             except Exception as e:
                     await log(f"Failed to load model's response while streaming: {repr(e)}", 'error')
                     raise Exception(f"Failed to load model's response while streaming: {repr(e)}")
-
+                    
             self.warmed_up = True
             await log(f"{self.name} ({self.ollama_name}) warmed up!", "success")
 

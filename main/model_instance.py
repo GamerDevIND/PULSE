@@ -19,7 +19,6 @@ class LocalModel(Model):
         self.start_command = ["ollama", "serve"]
         self.ollama_env = os.environ.copy()
         self.ollama_env["OLLAMA_HOST"] = self.host
-      
         self.warmed_up = False
         self.process = None
         self.use_custom_keep_alive_timeout = True
@@ -41,7 +40,7 @@ class LocalModel(Model):
         custom_keep_alive_timeout: str = "-1",
         has_video_processing=False,
         warmup_video_path="main/test.mp4"):
-
+            
         log_dir = os.path.join("main", "logs")
         os.makedirs(log_dir, exist_ok=True)
         log_file_path = os.path.join(log_dir, f"{self.ollama_name}.log")
@@ -84,10 +83,10 @@ class LocalModel(Model):
 
         await self._warmer(use_mmap, warmup_image_path, use_custom_keep_alive_timeout, custom_keep_alive_timeout,
                            has_video_processing, warmup_video_path)
-
+    
     async def generate(self, query: str, context: list[dict], stream: bool, think: str | bool | None = False, image_path: None | str = None, 
-                   mod_ = 10, system_prompt_override: str | None = None, options:dict | None = None, format: dict | None = None):
-
+                   mod_ = 10, system_prompt_override: str | None = None, options:dict | None = None, format_: dict | None = None):
+    
         async with self.state_lock:
             if self.state != IDLE:
                 await log(f"{self.name} is busy", "warn")
@@ -106,7 +105,8 @@ class LocalModel(Model):
             options["keep_alive"] = self.custom_keep_alive_timeout
         try:
             async for chunk in self._generator(query, context, stream, think, 
-                                                                              image_path, mod_, system_prompt_override=system_prompt_override, options=options, format=format):
+                                                                              image_path, mod_, system_prompt_override=system_prompt_override, 
+                                                                              options=options, format_=format_):
                 yield chunk
 
         finally:
@@ -117,7 +117,7 @@ class LocalModel(Model):
 
     async def shutdown(self):
         await log(f"Shutting down {self.name}...", "info")
-
+        
         async with self.state_lock:
             if self.state in (DOWN, SHUTTING_DOWN):
                 return
@@ -135,7 +135,7 @@ class LocalModel(Model):
                     resp.raise_for_status()
             except Exception:
                 pass 
-
+            
             await asyncio.sleep(0.5) 
             try:
                 await self.session.close()
@@ -169,7 +169,7 @@ class LocalModel(Model):
                             p.kill()
                         except psutil.NoSuchProcess:
                             pass
-
+                            
             except psutil.NoSuchProcess:
                 await log(f"Process {pid} already terminated.", "debug")
             except Exception as e:

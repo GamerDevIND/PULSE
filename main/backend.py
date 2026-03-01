@@ -2,7 +2,6 @@ from .model_instance import LocalModel
 from .models_profile import RemoteModel
 import asyncio
 from .configs import ERROR_TOKEN
-from typing import AsyncGenerator
 from .utils import log
 
 class Backend:
@@ -27,21 +26,29 @@ class Backend:
                         pass
                     self.generation_task = None
 
-    async def generate(self, role:str, query:str, context: list[dict], stream: bool, think: str | bool | None = False, image_path: None | str = None, 
-                       system_prompt_override=None, mod_ = 10):
+    def get_model(self, role):
+        model_obj = self.models.get(role)
+        return model_obj
 
+    async def generate(self, role:str, query:str, context: list[dict], stream: bool, think: str | bool | None = False, image_path: None | str = None, 
+                       system_prompt_override=None, mod_ = 10, custom_active_model:LocalModel | RemoteModel | None = None, 
+                       custom_generation_task: None | asyncio.Task = None):
+        
         if image_path and role != "vision": 
             await log("Image / Video path provided but no vision model chosen. Role changing to Vision.", 'warn')
             role = "vision"
-
-        model_obj = self.models.get(role)
-        self.active_model = model_obj
+        
+        if custom_active_model:
+            model_obj = custom_active_model
+        else:
+            model_obj = self.models.get(role)
+            self.active_model = model_obj
 
         if not model_obj:
             await log(f"{role} not found in the model registry!","error")
             yield (ERROR_TOKEN, ERROR_TOKEN, [])
             return
-
+        
         if stream:
             queue = asyncio.Queue(maxsize=256)
             async def producer():
@@ -58,19 +65,20 @@ class Backend:
                         queue.put_nowait(None)
                     except asyncio.QueueFull:
                         pass
+                    
+            if not custom_generation_task:
+                task = asyncio.create_task(producer())
+                self.generation_task = task
+            
+                while True:
+                    item = await queue.get()
+                    if item is None:
+                        break
+                    thinking_chunk, content_chunk, tools_chunk = item
 
-            task = asyncio.create_task(producer())
-            self.generation_task = task
-
-            while True:
-                item = await queue.get()
-                if item is None:
-                    break
-                thinking_chunk, content_chunk, tools_chunk = item
-
-                yield (thinking_chunk or "", content_chunk or "", tools_chunk)
-
-            await task            
+                    yield (thinking_chunk or "", content_chunk or "", tools_chunk)
+            
+                await task            
         else:
             await log(f"Non-streaming mode active", "info")
             async for (thinking, content, tools) in model_obj.generate(query, context, False, think=think, 

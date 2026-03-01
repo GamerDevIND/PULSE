@@ -41,7 +41,7 @@ def schemaify(python_type: Any) -> dict: # Before you ask: yes, this is AI gener
 
     elif origin is Literal:  
         return {"enum": list(get_args(python_type))}  
-
+    
     elif origin is Union:  
         args = get_args(python_type)  
         if len(args) == 2 and type(None) in args:   
@@ -49,7 +49,7 @@ def schemaify(python_type: Any) -> dict: # Before you ask: yes, this is AI gener
             return schemaify(non_none_type)  
         else:  
             return {"anyOf": [schemaify(arg) for arg in args]}  
-
+    
     elif origin in (list, List):  
         args = get_args(python_type)  
         if args:  
@@ -59,7 +59,7 @@ def schemaify(python_type: Any) -> dict: # Before you ask: yes, this is AI gener
             }  
         else:  
             return {"type": "array"}
-
+   
     elif origin in (dict, Dict):  
         args = get_args(python_type)  
         if len(args) == 2:  
@@ -69,7 +69,7 @@ def schemaify(python_type: Any) -> dict: # Before you ask: yes, this is AI gener
             }  
         else:  
             return {"type": "object"}
-
+    
     elif origin is tuple:  
         args = get_args(python_type)  
         if len(args) == 1:  
@@ -85,7 +85,7 @@ def schemaify(python_type: Any) -> dict: # Before you ask: yes, this is AI gener
             }  
         else:  
             return {"type": "array"}  
-
+    
     elif inspect.isclass(python_type):  
         return {"type": "object"}  
     else:

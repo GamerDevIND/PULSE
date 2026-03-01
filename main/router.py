@@ -34,7 +34,7 @@ class Router:
             if not self.model:
                 await log("Router model not configured. Using default.", "error")
                 return query, self.fallback_role
-
+            
             if not self.model.warmed_up or self.model.state == DOWN:
                 await log("Router model is not warmed up or down", 'warn')
                 if self.auto_warmup:
@@ -49,7 +49,7 @@ class Router:
                 await log("No role provided for router", "error") 
                 raise Exception("No role provided for router")
 
-            async for _, part, _ in self.model.generate(query=query, context=context, stream=False, format = self.format):
+            async for _, part, _ in self.model.generate(query=query, context=context, stream=False, format_ = self.format):
                 if part == ERROR_TOKEN:
                     await log("Router API call failed. Using default.", "error")
                     return query, self.fallback_role
@@ -74,7 +74,7 @@ class Router:
                 return query, selected_role
             else:
                 await log(f"Router selected unknown role or failed to parse ('{selected_role}'). Using default '{self.fallback_role}'.", "warn")
-
+       
                 return query, self.fallback_role
         else:
             return await self.parse_query(query)
@@ -91,9 +91,9 @@ class Router:
             return query, "chaos"
         elif query.startswith(f"{self.manual_prefix}vision"):
             query = query.removeprefix(f"{self.manual_prefix}vision").strip()
-
+ 
             return query, "vision"
         else:
             await log(f"No or incorrect prefix, using default '{self.fallback_role}'", "info")
-
+              
             return query, self.fallback_role

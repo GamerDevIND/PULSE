@@ -21,7 +21,6 @@ class SingleServer(Backend):
         self.system_prompts = system_prompts
         self.default_system_prompt = default_system_prompt
 
-        # Auto-detect port from config file if not specified
         if ollama_port is None:
             try:
                 with open(models_list_path, 'r', encoding='utf-8') as f:
@@ -29,16 +28,17 @@ class SingleServer(Backend):
                     if models_data and isinstance(models_data, list):
                         ollama_port = models_data[0].get('port', 11434)
             except Exception:
-                ollama_port = 11434  # Default fallback
-
+                ollama_port = 11434 
         self.ollama_port = ollama_port
         self.models: dict[str, Model] = {}
         self.start_command = ["ollama", "serve"]
         self.ollama_env = os.environ.copy()
         self.ollama_env["OLLAMA_HOST"] = f"http://localhost:{self.ollama_port}"
+        self.ollama_env["OLLAMA_MAX_LOADED_MODELS"] = "15"
+        self.ollama_env["OLLAMA_NUM_PARALLEL"] = "15"
         self.process = None
         self.running_tasks = set()
-
+        
         self.active_model:Model | None = None
         self.generation_task = None
 
@@ -49,7 +49,7 @@ class SingleServer(Backend):
                 for model_data in models_data:
                     role = model_data.get('role')
                     port = model_data.get('port', self.ollama_port)
-
+                    
                     if port != self.ollama_port:
                         if auto_resolve_ports:
                             model_data['port'] = self.ollama_port
@@ -60,15 +60,15 @@ class SingleServer(Backend):
                         system = model_data.get("system_prompt")
                         if not (system and system.strip()):
                             model_data["system_prompt"] = self.system_prompts.get(role, self.default_system_prompt)
-
+                        
                         self.models[role] = Model(**model_data)
-
+    
                         self.models[role].host = f"http://localhost:{self.ollama_port}"
-
+                        
         except (FileNotFoundError, json.JSONDecodeError) as e:
             print(f"🟥 Error loading models: {e}")
             raise Exception("Models loading failed.", e)
-
+    
     async def async_load(self, auto_resolve_ports = True):
         try:
             async with aiofiles.open(self.models_list_path, 'r', encoding="utf-8") as f:
@@ -78,7 +78,7 @@ class SingleServer(Backend):
                 for model_data in models_data:
                     role = model_data.get('role')
                     port = model_data.get('port', self.ollama_port)
-
+                    
                     if port != self.ollama_port:
                         if auto_resolve_ports:
                             model_data['port'] = self.ollama_port
@@ -89,9 +89,9 @@ class SingleServer(Backend):
                         system = model_data.get("system_prompt")
                         if not (system and system.strip()):
                             model_data["system_prompt"] = self.system_prompts.get(role, self.default_system_prompt)
-
+                        
                         self.models[role] = Model(**model_data)
-
+    
                         self.models[role].host = f"http://localhost:{self.ollama_port}"
         except (FileNotFoundError, json.JSONDecodeError) as e:
             print(f"🟥 Error loading models: {e}")
@@ -134,7 +134,7 @@ class SingleServer(Backend):
                 await model.warm_up()
             else:
                 await log(f"{model.name} ({model.ollama_name}) is already warmed, skipping... This maybe abnormal, please ensure the initilising logic.", 'warn')
-
+    
     async def shutdown(self):
         await log(f"Shutting down Single Server...", "info")
         for m in self.models.values():
@@ -165,7 +165,7 @@ class SingleServer(Backend):
                             p.kill()
                         except psutil.NoSuchProcess:
                             pass
-
+                            
             except psutil.NoSuchProcess:
                 await log(f"Process {pid} already terminated.", "debug")
             except Exception as e:

@@ -1,6 +1,7 @@
 from .utils import convert_funcs, log
 from .configs import ERROR_TOKEN
 import inspect 
+import hashlib
 
 from typing import Literal, Type
 
@@ -49,12 +50,10 @@ class Tool:
         total_attempts = self.max_retry + 1
         while retries < total_attempts:
             try:
-                if inspect.iscoroutinefunction(self.func):
-                    r = await self.func(**args)
-                else:
-                    r = self.func(**args)
+                r = self.func(**args)
                 if inspect.isawaitable(r):
-                    r = await r
+                    await r
+                    
                 return None, r
 
             except retry_on as e:
@@ -73,17 +72,17 @@ class ToolRegistry:
 
     def __init__(self):
         self.tools = ToolRegistry._tools.copy()
-
+ 
 
     def clear(self):
         self.tools.clear()
-
+     
     def clear_global(self):
         ToolRegistry._tools.clear()
 
     def list_tools(self):
         return list(self.tools.values())
-
+    
     def list_tools_global(self):
         return list(ToolRegistry._tools.values())
 
@@ -105,7 +104,7 @@ class ToolRegistry:
            result = f"An error occurred while trying to execute Tool: {tool.name}\nMessage:{result}"
 
         data = {"role": "tool", "tool_name": tool.name, "content": result}
-
+      
         return data, tool
 
     def get(self, name):

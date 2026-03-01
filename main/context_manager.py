@@ -14,7 +14,8 @@ from .garbage_collector import GarbageCollector
 from .summariser import Summariser
 
 class ContextManager:
-    def __init__(self, context_path, summary_model: LocalModel | RemoteModel | None, summary_max_nums = 20, summary_keep_nums = 10, cache_folder = './cache', 
+    def __init__(self, context_path, summary_model: LocalModel | RemoteModel | None,summary_max_tokens = 4000, keep_tokens_after_summary = 2000, 
+                 min_recent_turns = 1, cache_folder = './cache', 
                  gc_time_limit = 259200, gc_limit_size_MBs = 50, gc_interval = 1800):
         self.context_path = context_path
 
@@ -27,7 +28,7 @@ class ContextManager:
         self.running_tasks = set()
         self.gc_interval = gc_interval
 
-        self.summariser = Summariser(summary_model, summary_max_nums, summary_keep_nums)
+        self.summariser = Summariser(summary_model,  summary_max_tokens, keep_tokens_after_summary, min_recent_turns)
 
         self.cache_dir = cache_folder
         self.cache_index_file = os.path.join(self.cache_dir, 'index.json')
@@ -194,14 +195,13 @@ class ContextManager:
         await self.append(data)
         await self.flush_queue()
 
-        if len(self.context) > self.summariser.summary_max_nums:
-            r = await self.summariser.maybe_summarise_context(self.context, self.summary, self.facts)
-            if r:
-                s, f, c = r
-                async with self.lock:
-                    self.summary = s
-                    self.facts = f
-                    self.context = c
+        r = await self.summariser.maybe_summarise_context(self.context, self.summary, self.facts)
+        if r:
+            s, f, c = r
+            async with self.lock:
+                self.summary = s
+                self.facts = f
+                self.context = c
 
         await self.save()
 
@@ -218,11 +218,13 @@ class ContextManager:
         async with self.lock:
             return deepcopy(list(self.context))
 
-    def get_summary(self):
-        return str(self.summary) if self.summary is not None else ""
+    async def get_summary(self):
+        async with self.lock:
+            return str(self.summary) if self.summary is not None else ""
 
-    def get_facts(self):
-        return deepcopy(self.facts) if self.facts is not None else ""
+    async def get_facts(self):
+        async with self.lock:
+            return deepcopy(self.facts) if self.facts is not None else ""
 
     async def shut_down(self):  
         index = await self.gc.gc(deepcopy(self.cache_index))
