@@ -1,6 +1,6 @@
 # P.U.L.S.E.
 
-Personal Unified Logic System Entity (V1.1)
+Personal Unified Logic System Entity (v1.2)
 
 # WHAT THE FUCK ON EARTH IS THIS PIECE OF SHIT?:
 
@@ -31,8 +31,6 @@ PULSE IS:
 ---
 
 Oh, by the way I added tool calling (function calling).
-
-And Single Server mode is still experimental. Expect unpredictable behaviour.
 
 ---
 
@@ -156,11 +154,13 @@ Then the AI class will handle them like little smart minions slaves
 
 - Agentic mode (because why the hell not / WIP please don't contact emergency services those screams AREN'T MINE.)
 
-- Perception (hoping to be added on v2.x)
+- Perception (hoping to be added on v2.x, I have no idea how I'll pull that off but eh let's see.)
 
 - Caffeine
 
 - Sleep
+
+- Staring at walls
 
 - My 3 brain cells can't think of anything else
 
@@ -169,47 +169,10 @@ Then the AI class will handle them like little smart minions slaves
 
 I'm not interested in giving my data and money to OpenAI and Google
 
-### **You don't know how LLMs (transformers) work? Here's a quick overview:**
-
-A transformer has:
-
-1. **ENCODER**: IT ENCODES THE DATA (IMGS TEXT AUDIO AND EVERY SINGLE DATA TYPE KNOWN TO MANKIND) INTO LIST OF NUMBERS, why? bcuz somewhere in the past, computer said to number: "I love you <3" and rest is history, THE ENCODER FOR SOME APPARANT REASON ALSO LEARNS LIKE (not really) THE ACTUAL MODEL (how? idk), why? only to "learn" the relation between words.. like thats the model's work
-
-
-2. **DECODER**: ITS THE TWIN BROTHER OF ENCODER BUT DOES THE EXACT OPPOSITE, IT CONVERTS THE ARRAY OF NUMBERS PUKED BY THE MODEL AND CONVERTS THEM INTO THE DESIRED DATA TYPE (IMGS TEXT AUDIO AND EVERY SINGLE DATA TYPE KNOWN TO MANKIND), FOR SOME REASON IT ALSO "learns" PATTERN, away from the encoder i assume, (and if they share the same patterns why dont use the same learnt vocab for both)
-
-
-3. **THE ACTUAL MODEL**: THIS PIECE OF SHIT HAS SOME COOL MATHS GOING ON, it eats the numbers from the encoder, does the digestion process and pukes the digested shit out to the decoder, and the digestive system consists of:
-i) *ATTENTION BLOCK* (the black magic): it allows the tensors of other words communicate to each other like its a family function and like the relatives they allow, ah yes you'll become an enginner becuz some uncle's brother's son's step son is a doctor who lives on mars
-ii) *MLPs* : the chill guy, it just learns patterns just like other models thats it 
-
-these repeats for the rest of eternity, until the output layer is reached
-
-
-
-the model takes the formed "thing" and predicts what should come next using probablity, why? its fun. how? temperature, unlike my friends's crush, its the parameter which controls the empathy of the model, this gives the option for the backward words to have a chance and appends it until the brakes aren't pressed  
-
------ QUESTIONS I MANAGED TO ANSWER -----
-
-1. Why do the twins not share the same vocab? Ans) they sometimes do. Only when the input and output formats are the same like txt2txt but if the formats are different it's not possible (at least not in this universe) to share the same vocab. As the decoding needs a different algorithm to decode the output like in text2img
-
-
-
---- POINTS I MISSED ---
-
-1. **TOKENISATION**: breaks the input into smaller words (ex: i eat dirt => [i, eat, dirt]) or subwords (ex: cinematic universe -> [cinema, tic, uni, verse] . SPOILER: thisishowllmscanreadthistexts
-
-
-2. **Positional embedding**: as llms are just math equations throwing pseudo-random predictions (and ironically replacing humans) it lacks the basic understanding of positions thus we need to yet another matrix just for the sake of GPS and sanity. Otherwise to a llm "I eat grass" is same as "eat i grass"
-
-
-3. **Etc**: it's not over yet i just lack the knowledge and too lazy to search it
-
-4. **Current LLMs**: Most modern LLMs are decoder only, meaning the "encoder" is just the embedding layer and the model just predicts the next token based on previously generated ones.
+### Documentation will be added shortly in the future.
 
 ---
 
 # End note:
 
 If this README confuses you don't worry so does life. Congratulations you have successfully made this far. Here's some coffee for you: ☕. Thanks a lot for wasting your time with me. I really appreciate it!
-
