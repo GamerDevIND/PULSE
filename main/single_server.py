@@ -5,7 +5,6 @@ from .tools import Tool
 from .utils import log
 from .models_profile import RemoteModel as Model
 from .backend import Backend
-import aiohttp
 import subprocess 
 import sys
 import os
