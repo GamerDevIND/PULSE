@@ -77,7 +77,7 @@ pip install -r requirements.txt
 ```
 
 
-5. Write some interface code and the backend might be on AI.py
+5. Write some interface code and the backend might be on AI.py. Though there are some basic UI examples in the `UI/` folder.
 
 
 6. Run and test the code
