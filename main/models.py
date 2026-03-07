@@ -149,7 +149,7 @@ class Model:
             else:
                 await log(f"No valid type dectected for: {tool}", 'warn')
 
-    def cancel(self):
+    def cancel_global(self):
         self.generation_cancelled = True
 
     async def generate(self, query: str, context: list[dict], stream: bool, think: str | bool | None = False, image_path: None | str = None, 
@@ -161,7 +161,8 @@ class Model:
         raise NotImplementedError
 
     async def _generator(self, query: str, context: list[dict], stream: bool, think: str | bool | None = False,file_path: None | str = None, 
-                   mod_ = 10, video_save_buffer_format = "JPEG", system_prompt_override: str | None = None, options : dict | None = None, format_: dict | None = None) :
+                   mod_ = 10, video_save_buffer_format = "JPEG", system_prompt_override: str | None = None, options : dict | None = None, format_: dict | None = None):
+        
         endpoint = self._get_endpoint()
         url = f"{self.host}{endpoint}"
 
@@ -235,7 +236,7 @@ class Model:
                             chunk = raw_chunk.decode("utf-8", errors='ignore')
                             buffer += chunk
 
-                            while "\n" in buffer and not self.generation_cancelled:
+                            while "\n" in buffer and not self.generation_cancelled and (not self.session.closed):
                                 line, buffer = buffer.split("\n", 1)
                                 line = line.strip()
                                 if not line:
@@ -254,6 +255,9 @@ class Model:
                                 await response.release()
                                 self.generation_cancelled = False
                                 break
+
+                            if self.session.closed:
+                                await response.release()
 
                     except asyncio.CancelledError:
                         await log(f"Generation cancelled for {self.name}", "info")

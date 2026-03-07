@@ -85,7 +85,7 @@ class LocalModel(Model):
                            has_video_processing, warmup_video_path)
     
     async def generate(self, query: str, context: list[dict], stream: bool, think: str | bool | None = False, image_path: None | str = None, 
-                   mod_ = 10, system_prompt_override: str | None = None, options:dict | None = None, format_: dict | None = None):
+                   mod_ = 10, system_prompt_override: str | None = None, options:dict | None = None, format_: dict | None = None, custom_session = None):
     
         async with self.state_lock:
             if self.state != IDLE:
@@ -106,7 +106,7 @@ class LocalModel(Model):
         try:
             async for chunk in self._generator(query, context, stream, think, 
                                                                               image_path, mod_, system_prompt_override=system_prompt_override, 
-                                                                              options=options, format_=format_):
+                                                                              options=options, format_=format_, custom_session=custom_session):
                 yield chunk
 
         finally:

@@ -9,12 +9,9 @@ from .backend import Backend
 
 class MultiServer(Backend):
     def __init__(self, models_list_path:str, system_prompts:dict[str, str], default_system_prompt,) -> None:
-        self.models_list_path = models_list_path
-        self.system_prompts = system_prompts
-        self.default_system_prompt = default_system_prompt
+        super().__init__(models_list_path, system_prompts, default_system_prompt)
         self.models:dict[str, Model] = {}
         self.checking_event = asyncio.Event()
-        self.running_tasks = set()
         self.active_model = None 
         self.generation_task = None
 
@@ -86,18 +83,16 @@ class MultiServer(Backend):
                 await model.warm_up()
             else:
                 await log(f"{model.name} ({model.ollama_name}) is already warmed, skipping... This maybe abnormal, please ensure the initilising logic.", 'warn')
+        
+        self._init()
 
         check_task = asyncio.create_task(self._check_models())
         self.running_tasks.add(check_task)
 
     async def shutdown(self):
         self.checking_event.set()
-        for task in list(self.running_tasks):
-            task.cancel()
-            try:
-                await task
-            except asyncio.CancelledError:
-                pass
+
+        await self.close_sessions()
 
         for model in self.models.values():
             await model.shutdown()

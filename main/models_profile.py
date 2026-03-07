@@ -22,11 +22,11 @@ class RemoteModel(Model):
             await self.change_state(IDLE)
 
     async def generate(self, query: str, context: list[dict], stream: bool, think: str | bool | None = False, image_path: None | str = None, 
-                   mod_ = 10, system_prompt_override: str | None = None, options: dict | None = None, format_: dict | None = None):
+                   mod_ = 10, system_prompt_override: str | None = None, options: dict | None = None, format_: dict | None = None, custom_session = None):
         await log(f"Generating response from {self.name}...", "info")
         await self.change_state(BUSY)
         async for chunk in self._generator(query, context, stream, think, image_path, mod_, 
-                                           system_prompt_override=system_prompt_override, options = options, format_ = format_):
+                                           system_prompt_override=system_prompt_override, options = options, format_ = format_, custom_session= custom_session):
             yield chunk
         await self.change_state(IDLE)
 

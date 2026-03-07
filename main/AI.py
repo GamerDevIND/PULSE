@@ -5,7 +5,7 @@ from .router import Router
 from .tools import ToolRegistry
 from .multi_server import MultiServer
 from .single_server import SingleServer
-from .generation_session import GenerationSession, CREATED, DONE, FAIL
+from .generation_session import GenerationSession
 from .context_manager import ContextManager
 from .configs import ( 
     CoT_PROMPT, 
@@ -16,8 +16,7 @@ from .configs import (
     VISION_PROMPT,
     SUMMARIZER_PROMPT,
     CHAOS_PROMPT,
-    FILE_NAME_KEY,
-    ERROR_TOKEN
+    ERROR_TOKEN,
 )
     
 class AI:
@@ -34,14 +33,11 @@ class AI:
         }
         self.default_role = 'chat'
         self.running_tasks = set()
-        self.sessions : set[GenerationSession] = set()
 
         self.mode = mode.lower()
         self.backend = None
 
         self.regen = False 
-
-        self.generator: None | GenerationSession = None
 
         self.max_turns = max_turns
         self.turns = 0
@@ -88,39 +84,18 @@ class AI:
 
         for t in self.backend.running_tasks:
             self.running_tasks.add(t)
-
-        t = asyncio.create_task(self._check_sessions())
-        self.running_tasks.add(t)
-        
-    async def _check_sessions(self):
-        while True:
-            for s in list(self.sessions):
-                if s.state in [DONE, FAIL]:
-                    self.sessions.remove(s)
-
-            await asyncio.sleep(5.5)
                 
-    async def cancel_generation(self, session:GenerationSession | None = None):
+    async def cancel_generation(self, session_id:str):
         self.regen = False
 
         if not self.backend:
             await log("No backend provided!", 'error')
             return
         
-        await self.backend.cancel_generation()
-
-        if session:
-            await session.cancel()
+        await self.backend.cancel_generation(session_id)
             
         await log('Generation cancelled by user', 'info')
 
-    async def generate_session(self, query:str, context:list[dict], tools_regis:ToolRegistry, model, system_prompt_override: str | None = None, 
-                options: dict | None = None, format_: dict | None = None, max_turns = 10, abs_max_turns = 50, regen_consent_callback= None):
-        session = GenerationSession(query, context, tools_regis, model, 
-                system_prompt_override, options, format_, max_turns, abs_max_turns, regen_consent_callback)
-        
-        self.sessions.add(session)
-        return session
 
     async def generate(self, query, stream: None | bool = None, manual_routing=False, think=None, file_path=None, video_frames_mod= 10, user_save_prefix = None, 
                        save_thinking = True, options = None, format_: dict | None = None):
@@ -136,10 +111,6 @@ class AI:
 
         system = CHAOS_PROMPT if role == "chaos" else None
 
-        if self.generator is not None:
-            await log('Another generator is ongoing, please wait till it finishes!', 'warn')
-            return
-
         role = "chat" if role == "chaos" else role
         model = self.backend.get_model(role)
         if not model:
@@ -152,7 +123,7 @@ class AI:
         context = await self.context_manager.context_resolver(context)
 
         if file_path:
-            file_path = await self.context_manager.file_path_resolver(file_path)
+            file_path = await self.context_manager.cache_manager.file_path_resolver(file_path)
 
         summary = await  self.context_manager.get_summary()
         facts = await self.context_manager.get_facts()
@@ -175,23 +146,22 @@ class AI:
                                            {f}
                                            
                                            THESE ARE NOT A PART OF THE CONVERSATION. THESE ARE SYSTEM GENERATED PERSISTED MEMORY"""}) # role:system is fatal.
-                
-        self.generator = GenerationSession(query, context, self.tools_regis, model, system, options, format_, self.max_turns, self.abs_max_turns, 
-                                                self.regen_consent_callback)
-        
-        async for (thinking, content) in self.generator.generate(stream, user_save_prefix, think, file_path, video_frames_mod, save_thinking):
-            if content == ERROR_TOKEN:
-                await log("An error occured in the generation!", 'error')
-                self.generator = None
-                return
             
+        sid, session = await self.backend.create_session(query, context, self.tools_regis, role, system, options, format_,
+                                                         self.max_turns, self.abs_max_turns, self.regen_consent_callback)
+                
+        async for (thinking, content) in session.generate(stream, user_save_prefix, think, file_path, video_frames_mod, save_thinking):
+            
+            if content == ERROR_TOKEN:
+                return
+        
             yield (thinking or "", content or "")
 
-        c = await self.generator.get_context()
+        c = await session.get_context()
+        await self.backend.remove_session(sid)
+        
         await self.context_manager.add_and_maintain(c)
         await self.context_manager.save()
-
-        self.generator = None
 
     async def shut_down(self):
         await log("Shutting Down all services...", "info")
@@ -203,14 +173,6 @@ class AI:
                 pass
 
         await self.context_manager.shut_down()
-
-        if self.generator:
-            await self.generator.cancel()
-            self.generator = None
-
-        for session in list(self.sessions):
-            if session.state != CREATED:
-                await session.cancel()
         
         if self.backend:
             await self.backend.shutdown()

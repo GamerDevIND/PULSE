@@ -16,9 +16,7 @@ else:
 
 class SingleServer(Backend):
     def __init__(self, models_list_path:str, system_prompts:dict[str, str], default_system_prompt, ollama_port = None) -> None:
-        self.models_list_path = models_list_path
-        self.system_prompts = system_prompts
-        self.default_system_prompt = default_system_prompt
+        super().__init__(models_list_path, system_prompts, default_system_prompt)
 
         if ollama_port is None:
             try:
@@ -35,7 +33,6 @@ class SingleServer(Backend):
         self.ollama_env["OLLAMA_HOST"] = f"http://localhost:{self.ollama_port}"
         
         self.process = None
-        self.running_tasks = set()
         
         self.active_model:Model | None = None
         self.generation_task = None
@@ -132,11 +129,15 @@ class SingleServer(Backend):
                 await model.warm_up()
             else:
                 await log(f"{model.name} ({model.ollama_name}) is already warmed, skipping... This maybe abnormal, please ensure the initilising logic.", 'warn')
+
+        self._init()
     
     async def shutdown(self):
         await log(f"Shutting down Single Server...", "info")
         for m in self.models.values():
             await m.shutdown()
+
+        await self.close_sessions()
 
         if self.process is not None:
             pid = self.process.pid

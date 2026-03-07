@@ -1,17 +1,15 @@
 from .utils import convert_funcs, log
 from .configs import ERROR_TOKEN
 import inspect 
-import hashlib
 
 from typing import Literal, Type
 
 def tool(
     *,
     needs_regeneration:bool = False,
-    retry: Literal["none", "always", ] = "none",
+    retry: Literal["none", "always",] = "none",
     max_retries: int = 0,
-    retry_on: tuple[Type[Exception], ...] | None = None,
-    visible_to_user: bool = True,
+    retry_on: tuple[Type[Exception], ...] | tuple = (),
 ):
     def decor(func):
         metadata = {
@@ -19,7 +17,6 @@ def tool(
             "retry": retry,
             "max_retries": max_retries,
             "retry_on": retry_on or (),
-            "visible_to_user": visible_to_user,
         }
         func.__meta__ = metadata
         ToolRegistry.register(func, metadata)
@@ -35,17 +32,11 @@ class Tool:
         self.max_retry = meta["max_retries"]
         self.retry_on = meta["retry_on"]
         self.retry = meta['retry']
-        self.visible_to_user = meta["visible_to_user"]
 
     async def execute(self, **args):
         retries = 0
         error = f"An error occurred executing {self.name}" # fallback 
         retry_on = tuple(self.retry_on) or ()
-        if len(retry_on) < 1:
-            try:
-                await log(f"{self.name} has 0 retries exceptions set, updating to Exception retry fallback", "warn")
-            finally: pass
-            retry_on = retry_on or (Exception,)
 
         total_attempts = self.max_retry + 1
         while retries < total_attempts:

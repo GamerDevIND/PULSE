@@ -30,7 +30,7 @@ class GenerationSession:
         self.created_at = datetime.datetime.now().timestamp()
         self.generation_task = None
         self.sys_override = system_prompt_override
-        self.opts = options
+        self.options = options
         self.format = format_
 
         self.turns = 0
@@ -40,6 +40,7 @@ class GenerationSession:
 
         self.state_lock = asyncio.Lock()
         self.context_lock = asyncio.Lock()
+
         self.regen_consent_callback = regen_consent_callback
         self.regen = False
         asyncio.create_task(log(f"Generation Session created at {self.created_at}", 'info'))
@@ -75,9 +76,12 @@ class GenerationSession:
                 try:
                     async for (thinking_chunk, content_chunk, tools_chunk) in self.model.generate(query, self.context, True,
                                                                                                         think=think, image_path=image_path, mod_ = mod_, 
-                                                                                                        system_prompt_override=self.sys_override, ):
+                                                                                                        system_prompt_override=self.sys_override, options=self.options,
+                                                                                                        format_=self.format):
+
                         if content_chunk == ERROR_TOKEN:
                             await self.change_state(FAIL)
+                            
                             break
                         await queue.put((thinking_chunk, content_chunk, tools_chunk))
                 except asyncio.CancelledError:
@@ -107,21 +111,23 @@ class GenerationSession:
         
             await task            
         else:
-            await log(f"Non-streaming mode active", "info")
-            async for (thinking, content, tools) in self.model.generate(query, self.context, False, think=think, 
-                                                                              image_path=image_path, mod_ = mod_, system_prompt_override=self.sys_override):
+           async for (thinking_chunk, content_chunk, tools_chunk) in self.model.generate(query, self.context, False,
+                                                                                                        think=think, image_path=image_path, mod_ = mod_, 
+                                                                                                        system_prompt_override=self.sys_override, options=self.options,
+                                                                                                        format_=self.format):
+
                 await log(f"Got non-streaming response chunk", "info")
-                if content == ERROR_TOKEN:
+                if content_chunk == ERROR_TOKEN:
                     await self.change_state(FAIL)
                     break
 
-                if tools:
-                    tools_called.extend(tools)
+                if tools_chunk:
+                    tools_called.extend(tools_chunk)
 
-                thinking_final += thinking or ""
-                content_final += content or ""
+                thinking_final += thinking_chunk or ""
+                content_final += content_chunk or ""
 
-                yield (thinking or "", content or "")
+                yield (thinking_chunk or "", content_chunk or "")
 
         if self.query and self.query.strip(): 
             async with self.context_lock:
@@ -153,10 +159,13 @@ class GenerationSession:
             return False
 
     async def cancel(self):
-        await self.change_state(CANCELLING)
 
-        if self.model:
-            self.model.cancel()
+        if self.state in [CANCELLED, CANCELLING]:
+            return
+
+        await self.change_state(CANCELLING)
+        try:
+                
             if self.generation_task:
                 if not self.generation_task.done():
                     self.generation_task.cancel()
@@ -165,8 +174,8 @@ class GenerationSession:
                     except asyncio.CancelledError:
                         pass
                     self.generation_task = None
-
-        await self.change_state(CANCELLED)
+        finally:
+            await self.change_state(CANCELLED)
 
     async def get_context(self):
         async with self.context_lock:
