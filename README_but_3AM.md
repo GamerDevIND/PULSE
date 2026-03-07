@@ -1,6 +1,6 @@
 # P.U.L.S.E.
 
-Personal Unified Logic System Entity (v1.2)
+Personal Unified Logic System Entity (v1.2.5)
 
 This is the chaotic version.
 
@@ -176,5 +176,6 @@ I'm not interested in giving my data and money to OpenAI and Google
 ---
 
 # End note:
+
 
 If this README confuses you don't worry so does life. Congratulations you have successfully made this far. Here's some coffee for you: ☕. Thanks a lot for wasting your time with me. I really appreciate it!
