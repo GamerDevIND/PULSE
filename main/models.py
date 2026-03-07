@@ -219,6 +219,8 @@ class Model:
             elif ext in VIDEO_EXTs and not self.has_video:
                 await log(f"Cannot process video file {file_path}: Model {self.name} is not configured for video processing.", 'warn')
 
+        await self.change_state(BUSY)
+
         buffer = ""
         try:
             timeout = aiohttp.ClientTimeout(total=None)
@@ -287,6 +289,7 @@ class Model:
             yield (ERROR_TOKEN, ERROR_TOKEN, [])
 
         self.generation_cancelled = False
+        await self.change_state(IDLE)
 
     async def _warmer(self,
         use_mmap=False,
