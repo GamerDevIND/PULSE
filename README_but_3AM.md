@@ -2,12 +2,15 @@
 
 Personal Unified Logic System Entity (v1.2)
 
-This is the polite version of the README.
+This is the chaotic version.
 
-For the director's cut with more swearing and less corporate read: README_but_3AM.md
+For the cleaner and more corporate read: README.md
 
-# What's this project?
-PULSE, or Personal Unified Logic System Entity is an attempt to create a local, opensource, and sovereign LLM semi-agentic runtime, running on:
+# WHAT THE FUCK ON EARTH IS THIS PIECE OF SHIT?:
+
+PULSE a.k.a. Personal Unified Logic System Entity is a replication of JARVIS (I just realised this implementation is closer to FRIDAY but I'll stick with JARVIS, bear with me) from Iron Man (MCU), but instead of arc reactor it runs on:
+
+- Coffee
 
 - [Ollama](https://ollama.com/)
 
@@ -17,44 +20,41 @@ PULSE, or Personal Unified Logic System Entity is an attempt to create a local, 
 
 - Open source LLMs
 
+- My slowly deteriorating mental stability
+
 
 PULSE IS:
 
-- An attempt to orchestrate and manage multiple concurrent LLMs locally for better UX with the tradeoff of increased resource consumption
+- A talking piece of fuck shit
 
 - A multimodel architecture for running multiple local LLMs
 
+- A unhinged system of LLMs which claims to be your friend, assistant and roaster
 
-It launches the configured models into their separate instances and manages them to avoid constant unload and reload latency.
-
-
-Some features I'm told to highlight:
-
-- LLM based routing with manual overrides. It utilizes another small LLM as an intent classification and correct role selection to choose the model the query is directed to. It also supports manual override for power users.
-
-- It supports two modes. `SingleServer` (mode = "single") and `MultiServer` (mode = "multi"). Multi server mode launches a separate Ollama server for each model instance. Single server mode is an attempt to manage multiple concurrent models in with single Ollama server.
-
-- I've also implemented a basic decorator based plugin system for tool calling (function calling) for better semi-agentic feel.
-
-
-***Warning:*** Single server mode is still an experimental feature. Unstable behaviour is expected.
 
 ---
 
-# Tech stuff
+Oh, by the way I added tool calling (function calling).
+Also The single server mode is still experimental. Expect unstable behaviour
 
-- [Python](https://www.python.org/)
+---
 
-- [aiohttp](https://pypi.org/project/aiohttp/), [aiofiles](https://pypi.org/project/aiofiles/) etc (see requirements.txt): because it's a bad idea for responsiveness to pause the main loop to get a response. (SPOILER: it's for multimodal and async I/O for http requests and files.)
+# TECH STUFF (because sadly this shit needs to work):
+
+- [Python](https://www.python.org/) (the snake, which bites)
+
+- [aiohttp](https://pypi.org/project/aiohttp/), [aiofiles](https://pypi.org/project/aiofiles/) etc (see requirements.txt): because unfortunately nobody wants to pause their main loop to get a response. (SPOILER: it's for multimodal and async I/O for http requests)
 - Multimodal support: served by Ollama. on their very own port to actually have multiple models (Yes, this is why I'm using aiohttp instead of ollama) and async file I/O for non-blocking file I/O in the main loop.
 
-- Per model configuration: system prompt and other configurations for each model is available for control and customisation.
+- Per model configuration: system prompt and other configurations for each model is available for some reason
 
 - Swappable models: as this is running locally nobody gives a fuck what you're doing you can do anything and everything that includes you can use any and every model you want.
 
+- Experimental features: random existential crisis with emotions. I don't know how it works.
+
 ---
 
-# How to use?:
+# HOW TO ACTUALLY USE THIS PIECE OF SHIT:
 
 1. Download and install [Ollama](https://ollama.com/download)
 
@@ -63,12 +63,12 @@ Some features I'm told to highlight:
 
 
 
-* [Smollm2](https://ollama.com/library/smollm2)
+- [Smollm2](https://ollama.com/library/smollm2)
 
-* [Zephyr](https://ollama.com/library/zephyr)
+- [Zephyr](https://ollama.com/library/zephyr)
 
-* [DeepSeek-R1](https://ollama.com/library/deepseek-r1)
-* [MoonDream](https://ollama.com/library/moondream)
+- [DeepSeek-R1](https://ollama.com/library/deepseek-r1)
+- [MoonDream](https://ollama.com/library/moondream)
 
 
 3. Install and setup [Python](https://www.python.org/downloads/)
@@ -95,9 +95,9 @@ Use the new `setup.py` for faster setup, it's still under development so expect 
 
 ---
 
-# Basic configuration setup guide:
+# BASIC CONFIGURATION SETUP GUIDE (if you care):
 
-1. You can define multiple models like this in a JSON file (preferably `Models_config.json`):
+1. You can define multiple models like this in a JSON file:
 
 
 ```json
@@ -109,8 +109,8 @@ Use the new `setup.py` for faster setup, it's still under development so expect 
         "has_tools": false, 
         "has_CoT": false, 
         "has_vision": false,
-        "port":11434
-       
+        "port":11434, 
+        "system_prompt": ""
     },
     {
         "role": "cot",
@@ -119,8 +119,7 @@ Use the new `setup.py` for faster setup, it's still under development so expect 
         "has_tools": true,
         "has_CoT":true,
         "has_vision": false,
-        "port": 13345
-        
+        "port": 13345,
     },
     {
         "role": "router",
@@ -129,8 +128,7 @@ Use the new `setup.py` for faster setup, it's still under development so expect 
         "has_tools": true,
         "has_CoT": false,
         "has_vision": false,
-        "port": 11435
-        
+        "port": 11435,
     },
     {
         "role": "vision",
@@ -140,15 +138,14 @@ Use the new `setup.py` for faster setup, it's still under development so expect 
         "has_CoT": false,
         "has_vision": true,
         "port": 11543
-       
     },
     ...
 ]
 ```
 
-Then the AI class will handle them like little smart minions.
+Then the AI class will handle them like little smart minions slaves
 
-2. System prompts are also available. Just configure them.
+2. System prompts are also available. Just configure it.
 
 
 # Future plans:
@@ -157,7 +154,7 @@ Then the AI class will handle them like little smart minions.
 
 - Vision (Image added. Video added. Audio is under consideration. Please stand by.)
 
-- Agentic mode (because why the hell not / WIP *expected* full drop: v1.5.x)
+- Agentic mode (because why the hell not / WIP please don't contact emergency services those screams AREN'T MINE.)
 
 - Perception (hoping to be added on v2.x, I have no idea how I'll pull that off but eh let's see.)
 
@@ -167,12 +164,14 @@ Then the AI class will handle them like little smart minions.
 
 - Staring at walls
 
+- My 3 brain cells can't think of anything else
+
 
 # Why Local?:
 
 I'm not interested in giving my data and money to OpenAI and Google
 
-### Documentation will be available in ARCHITECTURE.md soon if you're willing to know the internals.
+### For documentation check ARCHITECTURE.md (which will be provided soon) if your will to understand this chaos hasn't been satisfied.
 
 ---
 
