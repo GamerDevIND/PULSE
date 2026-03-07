@@ -24,7 +24,6 @@ async def main():
             shutdown_event.set()
             print("\nShutting down AI services...")
             await ai.shut_down()
-            
 
     sigint_state = {"count": 0, "last": 0.0}
     SIGINT_WINDOW = 3.0
@@ -54,25 +53,24 @@ async def main():
     def _sigterm_handler():
         asyncio.create_task(shutdown())
 
-    signals = [signal.SIGINT, signal.SIGTERM]
-    if sys.platform == "win32":
-        signals.append(signal.SIGBREAK)
-    for sig in signals:
+    for sig in (signal.SIGINT, signal.SIGTERM):
         try:
-            if sig == signal.SIGINT:
-                loop.add_signal_handler(sig, lambda: loop.create_task(_on_sigint()))
+            if sig is signal.SIGINT:
+                loop.add_signal_handler(sig, _sigint_handler)
             else:
-                loop.add_signal_handler(sig, lambda: loop.create_task(shutdown()))
+                loop.add_signal_handler(sig, _sigterm_handler)
         except NotImplementedError:
-            
-            if sig == signal.SIGINT:
-                signal.signal(sig, lambda *_: safe_trigger(_on_sigint()))
+            if sig is signal.SIGINT:
+                signal.signal(sig, lambda *_: asyncio.create_task(_on_sigint()))
             else:
-                signal.signal(sig, lambda *_: safe_trigger(shutdown()))
+                signal.signal(sig, lambda *_: asyncio.create_task(shutdown()))
 
+    # If stdin is not a TTY (non-interactive), keep running and wait for signals.
     if not sys.stdin.isatty():
         await log("No TTY detected — running headless; waiting for signals.", "info")
         await shutdown_event.wait()
+        if not shutdown_event.is_set():
+            await shutdown()
         return
 
     while not shutdown_event.is_set():
@@ -81,7 +79,8 @@ async def main():
         except EOFError:
             req = "/bye"
         except KeyboardInterrupt:
-           
+            # Ignore lone Ctrl+C at prompt to avoid shutting down all models.
+            # Generation cancellation is handled during generation; just continue.
             print()
             continue
 
