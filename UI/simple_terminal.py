@@ -1,7 +1,6 @@
 import asyncio
 import signal
 import sys
-import os
 import colorama
 import pathlib
 
@@ -13,8 +12,10 @@ from main.utils import log
 colorama.init()
 
 async def main():
-    ai = AI("main/Models_config_test.json")
+    ai = AI("main/Models_config.json")
     await ai.init("cli")
+
+    gen = None
 
     loop = asyncio.get_running_loop()
     shutdown_event = asyncio.Event()
@@ -33,10 +34,11 @@ async def main():
         if sigint_state["count"] == 0 or (now - sigint_state["last"]) > SIGINT_WINDOW:
             sigint_state["count"] = 1
             sigint_state["last"] = now
-            try:
-                await ai.cancel_generation()
-            except Exception:
-                pass
+            if gen:
+                try:
+                    await gen.terminate()
+                except Exception:
+                    pass
             print("\nPress Ctrl+C again within 3 seconds to exit.")
 
             async def _reset():
@@ -65,7 +67,6 @@ async def main():
             else:
                 signal.signal(sig, lambda *_: asyncio.create_task(shutdown()))
 
-    # If stdin is not a TTY (non-interactive), keep running and wait for signals.
     if not sys.stdin.isatty():
         await log("No TTY detected — running headless; waiting for signals.", "info")
         await shutdown_event.wait()
@@ -79,8 +80,6 @@ async def main():
         except EOFError:
             req = "/bye"
         except KeyboardInterrupt:
-            # Ignore lone Ctrl+C at prompt to avoid shutting down all models.
-            # Generation cancellation is handled during generation; just continue.
             print()
             continue
 
@@ -98,7 +97,12 @@ async def main():
                 await log("No image path. Continuing with text only.", "warn")
 
         try:
-            async for (thinking, response) in ai.generate(req, manual_routing=False, file_path=image_path):
+            gen = await ai.create_generation(req, manual_routing=False, file_path=image_path)
+
+            if not gen:
+                return
+
+            async for (thinking, response) in gen.stream():
                 if thinking:
                     print(f"{colorama.Fore.LIGHTBLACK_EX}{thinking}{colorama.Style.RESET_ALL}", end="", flush=True)
                 if response:
@@ -107,7 +111,8 @@ async def main():
             print()
 
         except KeyboardInterrupt:
-            await ai.cancel_generation()
+            if gen:
+                await gen.terminate()
             print(f"{colorama.Fore.RED}Generation cancelled{colorama.Style.RESET_ALL}")
         except Exception as e:
             await log(f"Main loop error: {e}", "error")
