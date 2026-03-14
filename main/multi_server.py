@@ -12,7 +12,7 @@ class MultiServer(Backend):
         super().__init__(models_list_path, system_prompts, default_system_prompt)
         self.models:dict[str, Model] = {}
         self.checking_event = asyncio.Event()
-        self.active_model = None 
+
         self.generation_task = None
 
     def load(self):
@@ -83,7 +83,7 @@ class MultiServer(Backend):
                 await model.warm_up()
             else:
                 await log(f"{model.name} ({model.ollama_name}) is already warmed, skipping... This maybe abnormal, please ensure the initilising logic.", 'warn')
-        
+
         self._init()
 
         check_task = asyncio.create_task(self._check_models())
