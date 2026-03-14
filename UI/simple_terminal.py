@@ -12,7 +12,7 @@ from main.utils import log
 colorama.init()
 
 async def main():
-    ai = AI("main/Models_config.json")
+    ai = AI("main/Models_config_test.json")
     await ai.init("cli")
 
     gen = None
