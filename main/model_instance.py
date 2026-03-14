@@ -87,13 +87,11 @@ class LocalModel(OllamaModel):
     async def generate(self, query: str, context: list[dict], stream: bool, think: str | bool | None = False, image_path: None | str = None, 
                    mod_ = 10, system_prompt_override: str | None = None, options:dict | None = None, format_: dict | None = None, custom_session = None):
 
-         await self.change_state(BUSY) 
-         self.generation_cancelled = False
+        await self.change_state(BUSY) 
+        self.generation_cancelled = False
 
         await log(f"Generating response from {self.name}...", "info")
 
-
-        options = {}
         if self.use_mmap:
             options["use_mmap"] = True
         if self.use_custom_keep_alive_timeout:
