@@ -11,7 +11,7 @@ from .cache_manager import CacheManager
 
 class ContextManager:
     def __init__(self, context_path, summary_model: LocalModel | RemoteModel | None,summary_max_tokens = 4000, keep_tokens_after_summary = 2000, 
-                 min_recent_turns = 1, cache_folder = './cache', 
+                 min_recent_turns = 3, cache_folder = './cache', 
                  gc_time_limit = 259200, gc_limit_size_MBs = 50, gc_interval = 1800):
         self.context_path = context_path
 
@@ -33,12 +33,12 @@ class ContextManager:
     async def context_resolver(self, context, file_name_key=FILE_NAME_KEY, max_keeps=1, auto_save=True):
         await self.flush_queue()
         async with self.lock:
-            
+
             context = await self.cache_manager.context_resolver(context, file_name_key ,max_keeps)
-            
+
             if auto_save:
                 self.context = context
-            
+
         return context
 
     async def append(self, data:dict | list[dict] | tuple[dict]): 
