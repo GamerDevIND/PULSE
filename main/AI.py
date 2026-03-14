@@ -5,7 +5,7 @@ from .router import Router
 from .tools import ToolRegistry
 from .multi_server import MultiServer
 from .single_server import SingleServer
-from .generation_session import GenerationSession
+from .backend import Generation
 from .context_manager import ContextManager
 from .configs import ( 
     CoT_PROMPT, 
@@ -16,7 +16,6 @@ from .configs import (
     VISION_PROMPT,
     SUMMARIZER_PROMPT,
     CHAOS_PROMPT,
-    ERROR_TOKEN,
 )
 
 class AI:
@@ -36,8 +35,6 @@ class AI:
 
         self.mode = mode.lower()
         self.backend = None
-
-        self.regen = False 
 
         self.max_turns = max_turns
         self.turns = 0
@@ -97,7 +94,7 @@ class AI:
         await log('Generation cancelled by user', 'info')
 
 
-    async def generate(self, query, stream: None | bool = None, manual_routing=False, think=None, file_path=None, video_frames_mod= 10, user_save_prefix = None, 
+    async def create_generation(self, query, stream: None | bool = None, manual_routing=False, think=None, file_path=None, video_frames_mod= 10, user_save_prefix = None, 
                        save_thinking = True, options = None, format_: dict | None = None):
 
         if not self.backend:
@@ -150,18 +147,10 @@ class AI:
         sid, session = await self.backend.create_session(query, context, self.tools_regis, role, system, options, format_,
                                                          self.max_turns, self.abs_max_turns, self.regen_consent_callback)
 
-        async for (thinking, content) in session.generate(stream, user_save_prefix, think, file_path, video_frames_mod, save_thinking):
+        gen = Generation(session, self.backend.remove_session, self.context_manager.add_and_maintain, stream,
+                         user_save_prefix, think, file_path, video_frames_mod, save_thinking)
 
-            if content == ERROR_TOKEN:
-                return
-
-            yield (thinking or "", content or "")
-
-        c = await session.get_context()
-        await self.backend.remove_session(sid)
-
-        await self.context_manager.add_and_maintain(c)
-        await self.context_manager.save()
+        return gen
 
     async def shut_down(self):
         await log("Shutting Down all services...", "info")
@@ -179,7 +168,7 @@ class AI:
         else:
             await log("No backend provided! Skipping backend shutdown.", 'error')
 
-        await log("PULSE System Offline.", "success")
+        await log("Full System Offline.", "success")
 
         await asyncio.sleep(1.0)
 
