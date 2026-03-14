@@ -1,5 +1,5 @@
 from .AI import AI
-from .models import Model
+from .models import OllamaModel, OllamaEmbedder
 from .backend import Backend
 from .utils import log
 from .context_manager import ContextManager
@@ -12,5 +12,5 @@ from .models_profile import RemoteModel
 from .garbage_collector import GarbageCollector
 from .tools import tool, Tool, ToolRegistry
 
-__all__ = ["AI", "Model", "log", 'tool', "ContextManager", "GenerationSession", "Summariser", "MultiServer", "SingleServer", 
+__all__ = ["AI", "OllamaModel", "OllamaEmbedder", "log", 'tool', "ContextManager", "GenerationSession", "Summariser", "MultiServer", "SingleServer", 
            "LocalModel", "RemoteModel", "GarbageCollector", "Tool", "ToolRegistry"]
