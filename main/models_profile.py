@@ -1,12 +1,12 @@
 import aiohttp
-from .models import Model, DOWN, BUSY, SHUTTING_DOWN, IDLE
+from .models import OllamaModel, DOWN, BUSY, SHUTTING_DOWN, IDLE
 from .utils import log
 import asyncio
 
-class RemoteModel(Model):
+class RemoteModel(OllamaModel):
     def __init__(self, role: str, name: str, ollama_name: str, has_tools: bool, has_CoT: bool, has_vision: bool, port, system_prompt: str) -> None:
         super().__init__(role,name,ollama_name, has_tools, has_CoT, has_vision, port, system_prompt)
-        
+
     async def warm_up(
         self,
         use_mmap=False,
@@ -46,7 +46,7 @@ class RemoteModel(Model):
                         resp.raise_for_status()
             except Exception:
                 pass 
-                
+
             await asyncio.sleep(0.5) 
             try:
                 if self.session:
