@@ -37,7 +37,7 @@ class OllamaModel:
         self.system = system_prompt
         self.warmed_up = False
         self.has_video = False
-
+        
         self.tools = []
         self.generation_cancelled = False
         self.session: aiohttp.ClientSession | None = None
@@ -162,7 +162,7 @@ class OllamaModel:
 
     async def _generator(self, query: str, context: list[dict], stream: bool, think: str | bool | None = False,file_path: None | str = None, 
                    mod_ = 10, video_save_buffer_format = "JPEG", system_prompt_override: str | None = None, options : dict | None = None, format_: dict | None = None):
-
+        
         endpoint = self._get_endpoint()
         url = f"{self.host}{endpoint}"
 
@@ -263,7 +263,7 @@ class OllamaModel:
 
                     except asyncio.CancelledError:
                         await log(f"Generation cancelled for {self.name}", "info")
-
+                        
                         return 
 
                 else:
@@ -275,12 +275,12 @@ class OllamaModel:
                         yield (thinking, content, tools)
                     except asyncio.CancelledError:
                         await log(f"Non-stream generation cancelled for {self.name}", "info")
-
+                        
                         return 
 
         except asyncio.CancelledError:
             await log(f"Request cancelled for {self.name}", "info")
-
+           
             self.generation_cancelled = False          
             return
 
@@ -310,7 +310,7 @@ class OllamaModel:
         try:
             if not self.session:
                 self.session = aiohttp.ClientSession()
-
+            
             await self.wait_until_ready(self.host)
 
             data = {
@@ -328,7 +328,7 @@ class OllamaModel:
             if use_custom_keep_alive_timeout:
                 options["keep_alive"] = custom_keep_alive_timeout
 
-
+            
             if self.has_vision:
                     if self.has_video and os.path.exists(warmup_video_path):
                         await log("Warming up with video frame extraction...", 'info')
@@ -390,7 +390,7 @@ class OllamaModel:
             except Exception as e:
                     await log(f"Failed to load model's response while streaming: {repr(e)}", 'error')
                     raise Exception(f"Failed to load model's response while streaming: {repr(e)}")
-
+                    
             self.warmed_up = True
             await log(f"{self.name} ({self.ollama_name}) warmed up!", "success")
 

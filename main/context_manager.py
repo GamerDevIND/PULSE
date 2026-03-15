@@ -33,12 +33,12 @@ class ContextManager:
     async def context_resolver(self, context, file_name_key=FILE_NAME_KEY, max_keeps=1, auto_save=True):
         await self.flush_queue()
         async with self.lock:
-
+            
             context = await self.cache_manager.context_resolver(context, file_name_key ,max_keeps)
-
+            
             if auto_save:
                 self.context = context
-
+            
         return context
 
     async def append(self, data:dict | list[dict] | tuple[dict]): 

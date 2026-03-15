@@ -62,7 +62,7 @@ class CacheManager:
                 sha256_hash.update(f.read(sample_size))
 
         return sha256_hash.hexdigest()
-
+    
     async def cache_file(self, file_path:str, skip_if_missing = True):
         if not (file_path and os.path.exists(file_path)):
             await log(F"{file_path} doesn't exist!", 'error')
@@ -70,7 +70,7 @@ class CacheManager:
                 return
             else:
                 raise FileNotFoundError(F"{file_path} doesn't exist!")
-
+        
         dest = None
 
         ext = os.path.splitext(file_path)[-1]
@@ -85,11 +85,11 @@ class CacheManager:
                 return
             else:
                 raise FileNotFoundError(f"{file_path} isn't a supported format!")
-
+        
         if not dest:
             await log(f"An error occurred processing the filename of {file_path}", 'error')
             return
-
+        
         try:
             hashed = await asyncio.to_thread(self._hash_file, file_path)
         except Exception as e:
@@ -102,7 +102,7 @@ class CacheManager:
                 return
             else:
                 raise Exception(f"Hashing for {file_path} failed.")
-
+        
         ext = f".{ext}" if not ext.startswith('.') else ext
 
         cached = f"{hashed}{ext}"
@@ -123,12 +123,12 @@ class CacheManager:
 
         await self.save()
         return dest
-
+    
     async def context_resolver(self, context, file_name_key=FILE_NAME_KEY, max_keeps=1):
         async with self.lock:
-
+            
             context = list(reversed(deepcopy(context)))
-
+            
             found_files = 0
             for c in context:
                 if file_name_key in c:
@@ -139,9 +139,9 @@ class CacheManager:
                         c["content"] += f"\n\n[System: Previous media '{file}' has been removed from memory by the system. User had upload that media previously during the conversation]"
 
             context = list(reversed(context))
-
+            
         return context
-
+    
     async def file_path_resolver(self, file_path, auto_cache = True):
         try:
             hashed = await asyncio.to_thread(self._hash_file, file_path)
@@ -157,7 +157,7 @@ class CacheManager:
             if hashed in self.cache_index:
                 self.cache_index[hashed]["last_used"] = datetime.datetime.now().timestamp()
                 return self.cache_index[hashed]['path']
-
+                
         if auto_cache:
             return await self.cache_file(file_path) 
         else:

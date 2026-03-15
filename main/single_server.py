@@ -31,9 +31,9 @@ class SingleServer(Backend):
         self.start_command = ["ollama", "serve"]
         self.ollama_env = os.environ.copy()
         self.ollama_env["OLLAMA_HOST"] = f"http://localhost:{self.ollama_port}"
-
+        
         self.process = None
-
+        
         self.generation_task = None
 
     def load(self, auto_resolve_ports=True):
@@ -43,7 +43,7 @@ class SingleServer(Backend):
                 for model_data in models_data:
                     role = model_data.get('role')
                     port = model_data.get('port', self.ollama_port)
-
+                    
                     if port != self.ollama_port:
                         if auto_resolve_ports:
                             model_data['port'] = self.ollama_port
@@ -54,15 +54,15 @@ class SingleServer(Backend):
                         system = model_data.get("system_prompt")
                         if not (system and system.strip()):
                             model_data["system_prompt"] = self.system_prompts.get(role, self.default_system_prompt)
-
+                        
                         self.models[role] = Model(**model_data)
-
+    
                         self.models[role].host = f"http://localhost:{self.ollama_port}"
-
+                        
         except (FileNotFoundError, json.JSONDecodeError) as e:
             print(f"🟥 Error loading models: {e}")
             raise Exception("Models loading failed.", e)
-
+    
     async def async_load(self, auto_resolve_ports = True):
         try:
             async with aiofiles.open(self.models_list_path, 'r', encoding="utf-8") as f:
@@ -72,7 +72,7 @@ class SingleServer(Backend):
                 for model_data in models_data:
                     role = model_data.get('role')
                     port = model_data.get('port', self.ollama_port)
-
+                    
                     if port != self.ollama_port:
                         if auto_resolve_ports:
                             model_data['port'] = self.ollama_port
@@ -83,9 +83,9 @@ class SingleServer(Backend):
                         system = model_data.get("system_prompt")
                         if not (system and system.strip()):
                             model_data["system_prompt"] = self.system_prompts.get(role, self.default_system_prompt)
-
+                        
                         self.models[role] = Model(**model_data)
-
+    
                         self.models[role].host = f"http://localhost:{self.ollama_port}"
         except (FileNotFoundError, json.JSONDecodeError) as e:
             print(f"🟥 Error loading models: {e}")
@@ -130,7 +130,7 @@ class SingleServer(Backend):
                 await log(f"{model.name} ({model.ollama_name}) is already warmed, skipping... This maybe abnormal, please ensure the initilising logic.", 'warn')
 
         self._init()
-
+    
     async def shutdown(self):
         await log(f"Shutting down Single Server...", "info")
         for m in self.models.values():
@@ -163,7 +163,7 @@ class SingleServer(Backend):
                             p.kill()
                         except psutil.NoSuchProcess:
                             pass
-
+                            
             except psutil.NoSuchProcess:
                 await log(f"Process {pid} already terminated.", "debug")
             except Exception as e:

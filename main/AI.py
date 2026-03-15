@@ -17,7 +17,7 @@ from .configs import (
     SUMMARIZER_PROMPT,
     CHAOS_PROMPT,
 )
-
+    
 class AI:
     def __init__(self, model_config_path="main/Models_config.json", context_path="main/saves/context.json", 
                  mode:Literal['single'] | Literal['multi'] = "multi" , max_turns = 5,absolute_max_turns = 50,):
@@ -81,16 +81,16 @@ class AI:
 
         for t in self.backend.running_tasks:
             self.running_tasks.add(t)
-
+                
     async def cancel_generation(self, session_id:str):
         self.regen = False
 
         if not self.backend:
             await log("No backend provided!", 'error')
             return
-
+        
         await self.backend.cancel_generation(session_id)
-
+            
         await log('Generation cancelled by user', 'info')
 
 
@@ -113,7 +113,7 @@ class AI:
         if not model:
             await log(f"No model found for role: {role} in {self.mode} mode!", 'error')
             return
-
+            
         if stream is None:
             stream = self.platform not in STREAM_DISABLED
 
@@ -131,7 +131,7 @@ class AI:
                     {"\n\n-".join(facts).strip()}
                     </FACTS>
                     """ if facts and "".join(facts).strip() else ''
-
+       
         if summary: context.insert(0, {"role": "assistant", "content": f"""[PERSISTED MEMORY - NOT DIALOGUE]
                                            [INTERNAL MEMORY - DO NOT REPEAT - NOT PART OF CONVERSATION]
 
@@ -143,13 +143,13 @@ class AI:
                                            {f}
                                            
                                            THESE ARE NOT A PART OF THE CONVERSATION. THESE ARE SYSTEM GENERATED PERSISTED MEMORY"""}) # role:system is fatal.
-
+            
         sid, session = await self.backend.create_session(query, context, self.tools_regis, role, system, options, format_,
                                                          self.max_turns, self.abs_max_turns, self.regen_consent_callback)
-
+       
         gen = Generation(session, self.backend.remove_session, self.context_manager.add_and_maintain, stream,
                          user_save_prefix, think, file_path, video_frames_mod, save_thinking)
-
+        
         return gen
 
     async def shut_down(self):
@@ -162,14 +162,14 @@ class AI:
                 pass
 
         await self.context_manager.shut_down()
-
+        
         if self.backend:
             await self.backend.shutdown()
         else:
             await log("No backend provided! Skipping backend shutdown.", 'error')
 
         await log("Full System Offline.", "success")
-
+        
         await asyncio.sleep(1.0)
-
+        
         print("Done.")

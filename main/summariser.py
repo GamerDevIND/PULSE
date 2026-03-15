@@ -29,12 +29,12 @@ class Summariser:
         if not isinstance(self.model, (RemoteModel, LocalModel)): 
             await log("Summarising model not set. please provide a summarising model before summarising.", "error")
             return prev_summary, prev_facts, context 
-
+        
         contents = [x.get("content", "").strip() for x in context if x.get("content")]
         if prev_summary: contents.append(prev_summary)
         if prev_facts: contents.extend(prev_facts)
         total_words = " ".join(contents).split()
-
+        
         if (len(total_words) * 1.3) >= self.summary_max_tokens:  
             await log("Summarising started", 'info')
             text = '\n'  
@@ -54,7 +54,7 @@ class Summariser:
                     text += f"<{role}> {content} </{role}>\n"
 
                 used += message_tokens
-
+            
             text = f"""(user/assistant messages below are the ONLY new information)\nOutput ONLY the updated summary and facts text / array. No commentary.
             <NEW_CONVERSATION>
                 {text}

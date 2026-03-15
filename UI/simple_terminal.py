@@ -12,7 +12,7 @@ from main.utils import log
 colorama.init()
 
 async def main():
-    ai = AI("main/Models_config.json")
+    ai = AI("main/Models_config_test.json")
     await ai.init("cli")
 
     gen = None
@@ -66,7 +66,7 @@ async def main():
                 signal.signal(sig, lambda *_: asyncio.create_task(_on_sigint()))
             else:
                 signal.signal(sig, lambda *_: asyncio.create_task(shutdown()))
-
+    
     if not sys.stdin.isatty():
         await log("No TTY detected — running headless; waiting for signals.", "info")
         await shutdown_event.wait()
@@ -101,7 +101,7 @@ async def main():
 
             if not gen:
                 return
-
+            
             async for (thinking, response) in gen.stream():
                 if thinking:
                     print(f"{colorama.Fore.LIGHTBLACK_EX}{thinking}{colorama.Style.RESET_ALL}", end="", flush=True)
