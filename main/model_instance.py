@@ -85,21 +85,23 @@ class LocalModel(OllamaModel):
                            has_video_processing, warmup_video_path)
 
     async def generate(self, query: str, context: list[dict], stream: bool, think: str | bool | None = False, image_path: None | str = None, 
-                   mod_ = 10, system_prompt_override: str | None = None, options:dict | None = None, format_: dict | None = None, custom_session = None):
+                   mod_ = 10, system_prompt_override: str | None = None, options:dict | None = None, format_: dict | None = None,):
 
         await self.change_state(BUSY) 
         self.generation_cancelled = False
 
         await log(f"Generating response from {self.name}...", "info")
+        
+        if options:
+            if self.use_mmap:
+                options["use_mmap"] = True
+            if self.use_custom_keep_alive_timeout:
+                options["keep_alive"] = self.custom_keep_alive_timeout
 
-        if self.use_mmap:
-            options["use_mmap"] = True
-        if self.use_custom_keep_alive_timeout:
-            options["keep_alive"] = self.custom_keep_alive_timeout
         try:
             async for chunk in self._generator(query, context, stream, think, 
                                                                               image_path, mod_, system_prompt_override=system_prompt_override, 
-                                                                              options=options, format_=format_, custom_session=custom_session):
+                                                                              options=options, format_=format_):
                 yield chunk
 
         finally:

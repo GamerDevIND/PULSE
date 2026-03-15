@@ -26,7 +26,7 @@ class RemoteModel(OllamaModel):
         await log(f"Generating response from {self.name}...", "info")
         await self.change_state(BUSY)
         async for chunk in self._generator(query, context, stream, think, image_path, mod_, 
-                                           system_prompt_override=system_prompt_override, options = options, format_ = format_, custom_session= custom_session):
+                                           system_prompt_override=system_prompt_override, options = options, format_ = format_,):
             yield chunk
         await self.change_state(IDLE)
 
