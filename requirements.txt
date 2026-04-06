@@ -1,0 +1,6 @@
+aiohttp
+aiofiles
+av
+pillow 
+psutil
+datetime

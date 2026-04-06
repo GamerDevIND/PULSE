@@ -1,0 +1,4 @@
+# These are needed ONLY for the UI layer
+
+colorama
+quart

@@ -1,0 +1,134 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>{{ current_chat.name if current_chat else "New Chat" }}</title>
+
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+
+</head>
+<body>
+
+    <div id="loading-screen">
+
+        <div class="loader-content">
+
+            <div class="spinner"></div>
+
+            <h2 id="status-text">Connecting...</h2>
+
+            <p id="status-details"></p>
+
+        </div>
+
+    </div>
+
+    <div class="app-container">
+
+        <aside class="sidebar">
+
+            <div class="sidebar-header">
+
+                <h3>Conversations</h3>
+
+                <button class="new-chat-btn">New Chat</button>
+
+            </div>
+
+            <nav class="chat-list">
+
+                {% for chat in chats %}
+
+                    <a href="/chat/{{ chat.id }}" class="chat-item {% if current_chat and chat.id == current_chat.id %}active{% endif %}">
+
+                        <span class="chat-name">{{ chat.name }}</span>
+
+                    </a>
+
+                {% endfor %}
+
+            </nav>
+
+        </aside>
+
+        <main class="main-content">
+
+            <div class="chat-display" id="chat-display">
+
+                {% if history %}
+
+                    {% for msg in history %}
+
+                        <div class="message {{ msg.role }}-message">
+
+                           
+
+                            {% if msg.role == 'assistant' and msg.thinking %}
+
+                                <details class="thinking-wrapper">
+
+                                    <summary>Reasoning Process</summary>
+
+                                    <div class="thinking-content">{{ msg.thinking }}</div>
+
+                                </details>
+
+                            {% endif %}
+
+           
+
+                            <div class="content-text">
+
+                                {{ msg.content | safe }}
+
+                            </div>
+
+                        </div>
+
+                    {% endfor %}
+
+                {% endif %}
+
+            </div>
+       
+            {% if not history %}
+
+            <div class="greeting-container" id="greeting">
+
+                <h1>{{ greeting }}, {{ name }}.</h1>
+
+                <p>How can I help you?</p>
+
+            </div>
+
+            {% endif %}
+            
+            <div class="input-container">
+
+                <div class="input-area">
+                    <textarea id="user-input" placeholder="Type your query here..." autofocus></textarea>
+                    <button id="send-btn" title="Send Message">↑</button>
+                </div>
+            </div>
+        </main>
+    </div>
+    <template id="message-template">
+        <div class="message">
+
+            <details class="thinking-wrapper" style="display: none;">
+
+                <summary>Thinking...</summary>
+
+                <div class="thinking-content"></div>
+
+            </details>
+
+            <div class="content-text"></div>
+
+        </div>
+
+    </template>
+
+    <script type="module" src="{{ url_for('static', filename='script.js') }}"></script>
+
+</body>
+</html>
