@@ -12,7 +12,7 @@ from main.utils import log
 colorama.init()
 
 async def main():
-    ai = AI("main/openrouter_models_configs.json", mode='openrouter')
+    ai = AI("main/Models_configs.json", mode='openrouter')
     await ai.init("cli")
 
     gen = None
