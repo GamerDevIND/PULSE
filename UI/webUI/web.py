@@ -9,11 +9,11 @@ from quart import Quart, render_template, jsonify, request, Response, stream_wit
 import datetime
 
 from main.AI import AI
-from main.utils import log
+from main.utils import log, estimate_tokens
 from main.configs import USERNAME
 
 app = Quart(__name__)
-ai = AI("main/Models_configs.json", mode='openrouter')
+ai = AI("main/openrouter_models_configs.json", mode='openrouter')
 
 def get_greeting():
     now = datetime.datetime.now()
@@ -66,6 +66,9 @@ async def chat_view(cid):
         chat_summary = await chat.get_summary()
         chat_facts = await chat.get_facts()
         chats = await ai.context_manager.list_conversations()
+        words = [c["content"] for c in await chat.get_context()]
+        words = " ".join(words)
+        est = round(estimate_tokens(words))
         
         return await render_template("new.html", 
                                      greeting="",
@@ -74,7 +77,8 @@ async def chat_view(cid):
                                      current_chat=chat,
                                      history=chat_data,
                                      summary = chat_summary,
-                                     facts = chat_facts)
+                                     facts = chat_facts,
+                                     estimated_tokens = est)
     except KeyError:
         return "Chat not found", 404
     

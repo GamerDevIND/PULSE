@@ -7,12 +7,12 @@ import pathlib
 sys.path.append(str(pathlib.Path(__file__).parent.parent))
 
 from main.AI import AI
-from main.utils import log
+from main.utils import log, estimate_tokens
 
 colorama.init()
 
 async def main():
-    ai = AI("main/Models_configs.json", mode='openrouter')
+    ai = AI("main/openrouter_models_configs.json", mode='openrouter')
     await ai.init("cli")
 
     gen = None
@@ -28,6 +28,49 @@ async def main():
 
     sigint_state = {"count": 0, "last": 0.0}
     SIGINT_WINDOW = 3.0
+
+    @ai.event("initialising")
+    def p():
+        print("Initialising...")
+
+    @ai.event("initialised")
+    def r():
+        print("initialised")
+
+    @ai.event("shutting down")
+    async def a():
+        await shutdown()
+    ai.event("shut down")
+    def b():
+        print("Shut down successful")
+
+    ai.event("cancelling session")
+    def cancel(**_):
+        print(f"Session: was cancelled")
+
+    @ai.event("retrieving memory")
+    def rag(query, **_):
+        print(f"Retrieving memory for {query}")
+
+    @ai.event('garbage collector')
+    def gc(path, **_):
+        print(f"Garbage collector cleaning: {path}")
+    
+    @ai.event("routing role")
+    def route(role, **_):
+        print(f"Routing to {role}")
+
+    @ai.event("summarising")
+    def sumarise():
+        print("Summarising conversation...")
+
+    @ai.event("tool executing")
+    def tool(tool_name, **_):
+        print(f"Executing tool :{tool_name}")
+        
+    ai.event("tools executed")
+    def tools(**_):
+        print("Tools executed")
 
     async def _on_sigint():
         now = loop.time()
@@ -108,6 +151,11 @@ async def main():
                 if response:
                     print(response, end="", flush=True)
 
+            print()
+            words = await ai.context_manager.get_conversation(ai.last_cid)
+            words = [c["content"] for c in await words.get_context()]
+            words = estimate_tokens(" ".join(words))
+            print(f"Estimated total tokens: {round(words)}")
             print()
 
         except KeyboardInterrupt:
