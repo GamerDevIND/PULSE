@@ -3,11 +3,12 @@ from .models.ollama_models import DOWN
 from .models.models_profile import RemoteModel
 from .models.openrouter_model import OpenRouterModel
 from .configs import ERROR_TOKEN, SUMMARIZER_PROMPT
-from .utils import log
+from .utils import log, estimate_tokens
 import json
+from .events import EventBus
 
 class Summariser:
-    def __init__(self, model:RemoteModel | LocalModel | OpenRouterModel | None,  summary_max_tokens, summary_keep_tokens_after, min_recent_turns) -> None:
+    def __init__(self, model:RemoteModel | LocalModel | OpenRouterModel | None,  summary_max_tokens, summary_keep_tokens_after, min_recent_turns, event_bus : None | EventBus = None) -> None:
         self.summary_max_tokens = summary_max_tokens
         self.summary_keep_tokens_after = summary_keep_tokens_after
         self.min_recent_msgs = min_recent_turns * 2
@@ -23,6 +24,7 @@ class Summariser:
             },
             "required": ["summary", "facts",]
           }
+        self.event_bus = event_bus
 
     async def maybe_summarise_context(self, context, prev_summary : None | str = None, prev_facts : None | list[str] = None, summary_system_prompt = SUMMARIZER_PROMPT, auto_warm_up = False):
         if auto_warm_up and self.model and self.model.state == DOWN: 
@@ -34,9 +36,10 @@ class Summariser:
         contents = [x.get("content", "").strip() for x in context if x.get("content")]
         if prev_summary: contents.append(prev_summary)
         if prev_facts: contents.extend(prev_facts)
-        total_words = " ".join(contents).split()
         
-        if (len(total_words) * 1.3) >= self.summary_max_tokens:  
+        if estimate_tokens(" ".join(contents)) >= self.summary_max_tokens:  
+            if self.event_bus:
+                await self.event_bus.sequence_emit("summarising")
             await log("Summarising started", 'info')
             text = '\n'
             chunk_budget = self.summary_max_tokens - self.summary_keep_tokens_after
@@ -108,7 +111,9 @@ class Summariser:
                         entry = out
 
             except Exception as e:  
-                await log(f"Error during summarization: {e}", "error")  
+                await log(f"Error during summarization: {e}", "error")
+                if self.event_bus:
+                    await self.event_bus.sequence_emit("summarisation_failed", error=str(e))
 
             if entry:
                 try:
@@ -125,4 +130,6 @@ class Summariser:
 
             # TODO: Trim the context to remove older entries if needed explicitly  
             await log("Summarised successfully", 'success')
+            if self.event_bus:
+                await self.event_bus.sequence_emit('summarised', summary = summary, facts = facts, context = context)
             return summary, facts, context

@@ -11,22 +11,24 @@ from .summariser import Summariser
 from .cache_manager import CacheManager
 import os
 import datetime
+from .events import EventBus
 
 class ContextManager:
-    def __init__(self, context_dir, summary_model: LocalModel | RemoteModel | None,summary_max_tokens = 4000, keep_tokens_after_summary = 2000, 
+    def __init__(self, context_dir, summary_model: LocalModel | RemoteModel | None, summary_max_tokens = 4000, keep_tokens_after_summary = 2000, 
                  min_recent_turns = 3, cache_folder = './cache', 
-                 gc_time_limit = 259200, gc_limit_size_MBs = 50, gc_interval = 1800):
+                 gc_time_limit = 259200, gc_limit_size_MBs = 50, gc_interval = 1800, event_bus : None | EventBus = None):
         
         self.context_dir = context_dir
         self.conversations:dict[str, Conversation] = {}
 
         self.lock = asyncio.Lock()
 
-        self.summariser = Summariser(summary_model,  summary_max_tokens, keep_tokens_after_summary, min_recent_turns)
+        self.summariser = Summariser(summary_model,  summary_max_tokens, keep_tokens_after_summary, min_recent_turns, event_bus)
 
-        self.cache_manager = CacheManager(gc_time_limit, gc_limit_size_MBs, gc_interval, cache_folder)
+        self.cache_manager = CacheManager(gc_time_limit, gc_limit_size_MBs, gc_interval, cache_folder, event_bus)
 
         os.makedirs(self.context_dir, exist_ok=True)
+        self.event_bus = event_bus
 
     async def init(self):
         await self.load_all()

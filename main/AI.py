@@ -12,6 +12,7 @@ from .backends.single_server import SingleServer
 from .backends.backend import Generation
 from .RAG.manager import RAG_manager
 import inspect
+from .events import EventBus
 from .context_manager import ContextManager
 from .configs import ( 
     CoT_PROMPT, 
@@ -30,7 +31,9 @@ from .configs import (
 class AI:
     def __init__(self, model_config_path="main/Models_config.json", context_dir="main/saves/", 
                  mode:Literal['single'] | Literal['multi'] | Literal['openrouter'] = "multi" , max_turns = 5,  absolute_max_turns = 50, memory_db_path = "./RAG_DB",
-                   table_name = 'memories',  embedder_auto_warm_up = True, max_memory_rag_chars = 1000):
+                   table_name = 'memories', summary_max_tokens = 4000, keep_tokens_after_summary = 2000, 
+                 min_recent_turns = 3, cache_folder = './cache', 
+                 gc_time_limit = 259200, gc_limit_size_MBs = 50, gc_interval = 1800, embedder_auto_warm_up = True, max_memory_rag_chars = 1000):
         self.model_config_path = model_config_path
         self.context_dir = context_dir
         self.system_prompts = {
@@ -61,27 +64,49 @@ class AI:
         self.regen_consent_callback = None
         self.mem_save_confirm_callback = None
         self.platform = None
-        self.context_manager = ContextManager(self.context_dir, None)
+        self.event_bus = EventBus()
+        self.context_manager = ContextManager(self.context_dir, None,summary_max_tokens, keep_tokens_after_summary, 
+                 min_recent_turns, cache_folder, 
+                 gc_time_limit, gc_limit_size_MBs, gc_interval, self.event_bus)
         self.tools_regis = ToolRegistry()
         self.RAG_Manager = RAG_manager(None, embedder_auto_warm_up, memory_db_path, table_name)
 
     def load_models(self):
         d = DEFAULT_PROMPT + f"\n\nThe user's username is: {USERNAME}"
         if self.mode == 'multi':
-            self.backend = MultiServer(self.model_config_path, self.system_prompts, d)
+            self.backend = MultiServer(self.model_config_path, self.system_prompts, d, self.event_bus)
             self.backend.load()
         elif self.mode == 'single':
-            self.backend = SingleServer(self.model_config_path, self.system_prompts, d)
+            self.backend = SingleServer(self.model_config_path, self.system_prompts, d, event_bus=self.event_bus)
             self.backend.load()
         elif self.mode == 'openrouter':
-            self.backend = OpenrouterBackend(self.model_config_path, self.system_prompts, d)
+            self.backend = OpenrouterBackend(self.model_config_path, self.system_prompts, d, self.event_bus)
             self.backend.load()
         else:
             raise ValueError(f"Invalid mode: {self.mode}. Please ensure the mode is 'multi' or 'single'.")
 
+    def event(self, event_name:str):
+        def wrapper(func):
+            self.event_bus.add_listener(event_name, func)
+            func.__event_name__ = event_name
+            return func
+        
+        return wrapper
+
     async def init(self, platform: str, summarising_model_role = "summariser", max_turns = 5, absolute_max_turns = 50,
                    mode: Literal['single'] | Literal['multi'] | Literal['openrouter'] | None = None, regeneration_consent_callback = None, 
                    mem_save_confirm_callback = None, router_role = "router"): 
+        
+        await self.event_bus.parrallel_emit("initialising")
+        meta = {
+            "needs_regeneration": False,
+            "retry": "none",
+            "max_retries": 1,
+            "retry_on": (Exception,)
+        }
+        self.tools_regis.register(self.propose_memory, meta)
+
+
         self.max_turns = max_turns
         self.abs_max_turns = absolute_max_turns
 
@@ -101,6 +126,15 @@ class AI:
         
         async with self.lock:
             self.status = {"status":"Warming up models", "message": "Warming up models for inference..."}
+        
+        meta = {
+            "needs_regeneration": False,
+            "retry": "none",
+            "max_retries": 1,
+            "retry_on": (Exception,)
+        }
+
+        self.tools_regis.register(self.propose_memory, meta)
 
         await self.backend.init(self.tools_regis.list_tools())
 
@@ -130,25 +164,19 @@ class AI:
         await self.context_manager.init()
         await self.RAG_Manager.load()
 
-        meta = {
-            "needs_regeneration": False,
-            "retry": "none",
-            "max_retries": 1,
-            "retry_on": (Exception,)
-        }
-
-        self.tools_regis.register(self.propose_memory, meta)
-
         for t in self.backend.running_tasks:
             self.running_tasks.add(t)
 
         async with self.lock:
             self.status = {"status":"Initialised", "message": ""}
+
+        await self.event_bus.parrallel_emit('initialised')
                 
     async def cancel_generation(self, session_id:str):
+        await self.event_bus.sequence_emit('cancelling session', session_id = session_id)
         if not self.backend:
             await log("No backend provided!", 'error')
-            return
+            raise
         
         await self.backend.cancel_generation(session_id)
             
@@ -164,6 +192,8 @@ class AI:
 
         if not memory or not memory.strip() or len(memory) < 10:
             return "Empty or extrememly short memory. Skipping."
+        
+        await self.event_bus.sequence_emit('proposed memory', memory = memory)
         
         blacklist = ["i am a language model", "i'm a language model", "i am a god", "i'm a god", "as a helpful assistant", "i think the user", 
                                 "i believe we should remember", "i believe i should remember", "i believe its worth remembering", "i think we should remember", 
@@ -231,6 +261,7 @@ class AI:
             
         if use_RAG:
             self.status = {"status": "Retrieving memory...", "message": ""}
+            await self.event_bus.parrallel_emit("retrieving memory", query = query)
             rag_results = await self.RAG_Manager.retrieve(query, min_score=RAG_MIN_SCORE)
 
             if rag_results:
@@ -274,6 +305,8 @@ class AI:
             await log("No backend provided!", 'error')
             raise
 
+        await self.event_bus.sequence_emit("creating session")
+
         cid = cid or self.last_cid
         if not cid:
             await log(f"conversation for '{cid}' not found, creating a new conversation...", 'warn')
@@ -291,15 +324,19 @@ class AI:
         self.last_cid = c.id
         async with self.lock:
             self.status = {"status":"Routing", "message": ""}
+        
+        await self.event_bus.sequence_emit("routing")
 
         query, role = await self.router.route_query(query, context, manual_routing) if self.router else (query, self.default_role)
         if not role:
             role = self.default_role
 
+        await self.event_bus.sequence_emit("routing role", role = role)
+
         async with self.lock:
             self.status['message'] = f"Routing to: {role}"
 
-        system = CHAOS_PROMPT if role == "chaos" else None
+        system = (CHAOS_PROMPT + f"\n\nThe user's username is: {USERNAME}") if role == "chaos" else None
 
         role = "chat" if role == "chaos" else role
         model = self.backend.get_model(role)
@@ -331,15 +368,18 @@ class AI:
                                                          self.max_turns, self.abs_max_turns, self.regen_consent_callback)
        
         gen = Generation(session, self.backend.remove_session, lambda x: self.context_manager.add_and_maintain(cid, x, True), 
-                         stream,user_save_prefix, think, file_path, video_frames_mod, save_thinking)
+                         stream,user_save_prefix, think, file_path, video_frames_mod, save_thinking, self.event_bus)
     
         async with self.lock:
             self.status = {"status": "Session generation succcessful", "message": ""}
+        
+        await self.event_bus.sequence_emit('session created')
         
         return gen
 
     async def shut_down(self):
         await log("Shutting Down all services...", "info")
+        await self.event_bus.parrallel_emit('shutting down')
         async with self.lock:
             self.status = {"status": "Shutting down", "message": ""}
 
@@ -356,6 +396,8 @@ class AI:
             await self.backend.shutdown()
         else:
             await log("No backend provided! Skipping backend shutdown.", 'error')
+        
+        await self.event_bus.parrallel_emit('shut down')
 
         await log("Full System Offline.", "success")
         

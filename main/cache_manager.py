@@ -9,9 +9,10 @@ import datetime
 from .configs import IMAGE_EXTs, VIDEO_EXTs, FILE_NAME_KEY
 from .utils import log
 from copy import deepcopy
+from .events import EventBus
 
 class CacheManager:
-    def __init__(self, gc_time_limit, gc_limit_size_MBs, gc_interval, cache_folder) -> None:
+    def __init__(self, gc_time_limit, gc_limit_size_MBs, gc_interval, cache_folder, event_bus: None | EventBus = None) -> None:
         self.gc_interval = gc_interval
         self.lock = asyncio.Lock()
         self.cache_dir = cache_folder
@@ -28,6 +29,7 @@ class CacheManager:
         self.gc = GarbageCollector(self.images_dir, self.videos_dir, gc_time_limit, gc_limit_size_MBs)
 
         self.cache_index = {}
+        self.event_bus = event_bus
 
     async def init(self):
         check_task = asyncio.create_task(self._garbage_collect())

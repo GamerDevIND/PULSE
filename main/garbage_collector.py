@@ -1,14 +1,15 @@
 import os
 import asyncio
 import datetime
+from .events import EventBus
 
 class GarbageCollector:
-    def __init__(self, image_cache_dir, video_cache_dir, time_limit, size_threshold_in_mbs) -> None:
+    def __init__(self, image_cache_dir, video_cache_dir, time_limit, size_threshold_in_mbs, event_bus: None | EventBus = None) -> None:
         self.image_cache_dir = image_cache_dir
         self.video_cache_dir = video_cache_dir
         self.time_limit = time_limit
         self.size_threshold_in_mbs = size_threshold_in_mbs * 1024 * 1024
-
+        self.event_bus = event_bus
     
     async def gc(self, index):
         image_dir_list = os.listdir(self.image_cache_dir)
@@ -30,11 +31,15 @@ class GarbageCollector:
         for hash_key, data in index.items():
             if (now - data['last_used']) > self.time_limit:
                 if os.path.exists(data['path']):
+                    if self.event_bus:
+                        await self.event_bus.sequence_emit('garbage collector', path = data['path'])
                     await asyncio.to_thread(os.remove, data['path'])
                 keys_to_delete.append(hash_key)
             
             elif data['size'] > self.size_threshold_in_mbs and (now - data['last_used']) > (self.time_limit // 2):
                 if os.path.exists(data['path']):
+                    if self.event_bus:
+                        await self.event_bus.sequence_emit('garbage collector', path = data['path'])
                     await asyncio.to_thread(os.remove, data['path'])
                 keys_to_delete.append(hash_key)
             
@@ -51,9 +56,12 @@ class GarbageCollector:
                 if current_size <= global_size_threshold:
                     break
                 try:
+                    if self.event_bus:
+                        await self.event_bus.sequence_emit('garbage collector', path = data['path'])
                     await asyncio.to_thread(os.remove, index[k]['path'])
                     current_size -= index[k]['size']
                     del index[k]
                 except: pass
-
+        if self.event_bus:
+            await self.event_bus.sequence_emit('garbage collected')
         return index

@@ -3,6 +3,7 @@ from main.models.models_profile import RemoteModel, RemoteEmbedder
 from main.models.openrouter_model import OpenRouterEmbedder, OpenRouterModel
 import asyncio
 import os
+from main.events import EventBus
 from main.configs import ENV_READ_PREFIX
 from main.generation_session import GenerationSession, DONE, FAIL
 from main.tools import ToolRegistry
@@ -13,13 +14,15 @@ import json
 import aiofiles
 
 class Backend:
-    def __init__(self, models_list_path, system_prompts, default_system_prompt) -> None:
+    def __init__(self, models_list_path, system_prompts, default_system_prompt, event_bus: None | EventBus = None) -> None:
         self.models_list_path = models_list_path
         self.system_prompts = system_prompts
         self.default_system_prompt = default_system_prompt
         self.models:dict[str, LocalModel | LocalEmbedder | RemoteModel | RemoteEmbedder | OpenRouterEmbedder | OpenRouterModel] = {}
         self.sessions:dict[str, GenerationSession] = {}
         self.running_tasks = set()
+        self.event_bus = event_bus
+        
 
     def _create_model_data(self, models_data, model, embedder, override_port = False, overwritten_port=11343, auto_resolve_ports = True, require_key = False):
         for model_data in models_data:
@@ -135,7 +138,7 @@ class Backend:
             await log(f"Temporarily disabled {temp_remove_tool_name} for this turn.", "info")
         
         session = GenerationSession(query, context, tools_regis, model_obj, # type:ignore
-                system_prompt_override, options, format_, max_turns, abs_max_turns, regen_consent_callback, active_tools)
+                system_prompt_override, options, format_, max_turns, abs_max_turns, regen_consent_callback, active_tools, self.event_bus)
         
         session_id = session.id
         
@@ -156,7 +159,7 @@ class Backend:
 
 class Generation:
     def __init__(self, session:GenerationSession, remove_callback, append_callback, stream, user_save_prefix, think, 
-                 file_path, video_frames_mod, save_thinking) -> None:
+                 file_path, video_frames_mod, save_thinking, event_bus: None | EventBus = None) -> None:
         
         '''
         Note: `remove_callback` MUST cancel the given session through `session_id` before removal.
@@ -173,8 +176,11 @@ class Generation:
         self.video_frames_mod = video_frames_mod
         self.save_thinking = save_thinking
         self.tools_override =  None
+        self.event_bus = event_bus
     
     async def stream(self, ):
+        if self.event_bus:
+            await self.event_bus.sequence_emit("generation started", gen_id = self.session_id)
         try:
             async for (thinking, content) in self.session.generate(self.stream_, self.user_save_prefix, self.think, 
                                                                    self.file_path, self.video_frames_mod, self.save_thinking):
@@ -193,8 +199,16 @@ class Generation:
             r = self.append_callback(c)
             if inspect.isawaitable(r):
                 await r
+        
+        if self.event_bus:
+            await self.event_bus.sequence_emit("generation stopped" , gen_id = self.session_id)
 
     async def terminate(self):
+        if self.event_bus:
+            await self.event_bus.sequence_emit("generation terminated",  gen_id = self.session_id)
         r = self.remove_callback(self.session_id)
         if inspect.isawaitable(r):
             await r
+
+        if self.event_bus:
+            await self.event_bus.sequence_emit("generation stopped", gen_id = self.session_id)

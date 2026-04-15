@@ -2,10 +2,11 @@ from main.utils import log
 from .backend import Backend
 from main.models.openrouter_model import OpenRouterModel as Model, OpenRouterEmbedder as Embedder
 from main.tools import Tool
+from main.events import EventBus
 
 class OpenrouterBackend(Backend):
-    def __init__(self, models_list_path, system_prompts, default_system_prompt) -> None:
-        super().__init__(models_list_path, system_prompts, default_system_prompt)
+    def __init__(self, models_list_path:str, system_prompts:dict[str, str], default_system_prompt, event_bus: None | EventBus = None,) -> None:
+        super().__init__(models_list_path, system_prompts, default_system_prompt, event_bus)
     
     def load(self):
         self._load(Model, Embedder, False, require_key=True)

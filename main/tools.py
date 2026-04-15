@@ -1,6 +1,7 @@
 from .utils import convert_funcs, log
 from .configs import ERROR_TOKEN
 import inspect 
+import threading
 
 from typing import Literal, Type
 
@@ -48,21 +49,26 @@ class Tool:
                 return None, r
 
             except retry_on as e:
-                if self.retry == "none": return ERROR_TOKEN, repr(e)
+                if self.retry == "none": 
+                    return ERROR_TOKEN, repr(e)
                 retries += 1
                 error = repr(e)
-            except Exception as e: return ERROR_TOKEN, repr(e)
+            except Exception as e: 
+                return ERROR_TOKEN, repr(e)
         return ERROR_TOKEN, error
 
 class ToolRegistry:
     _tools = {}
+    _lock = threading.RLock()
 
     @classmethod
     def register(cls, func, meta):
-        cls._tools[func.__name__] = Tool(func, meta)
+        with cls._lock:
+            cls._tools[func.__name__] = Tool(func, meta)
 
     def __init__(self):
-        self.tools = ToolRegistry._tools.copy()
+        with ToolRegistry._lock:
+            self.tools = ToolRegistry._tools.copy()
  
 
     def clear(self):

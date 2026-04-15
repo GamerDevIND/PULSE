@@ -5,10 +5,11 @@ from main.models.models_profile import RemoteModel as Model, OllamaEmbedder as E
 from .backend import Backend
 from main.resource_manager import ResourceManager
 import os
+from main.events import EventBus
 
 class SingleServer(Backend):
-    def __init__(self, models_list_path:str, system_prompts:dict[str, str], default_system_prompt, ollama_port:None | int = None) -> None:
-        super().__init__(models_list_path, system_prompts, default_system_prompt)
+    def __init__(self, models_list_path:str, system_prompts:dict[str, str], default_system_prompt,  ollama_port:None | int = None, event_bus: None | EventBus = None,) -> None:
+        super().__init__(models_list_path, system_prompts, default_system_prompt, event_bus)
 
         if ollama_port is None:
             try:

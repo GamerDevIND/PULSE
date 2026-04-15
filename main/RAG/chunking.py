@@ -1,13 +1,11 @@
 import re
-
-def total_tokens(_chunk: list):   
-    return len(" ".join(_chunk).split()) * 1.3
+from main.utils import estimate_tokens
 
 def chunk(text:str, limit=700, overlap_size= 1) -> list[str]:
 
     text = re.sub(r'Reprint \d{4}-\d{2}', '', text)
 
-    if total_tokens(text.split()) <= limit:
+    if estimate_tokens(text) <= limit:
         return [text.strip()]
 
     chunks = []
@@ -31,12 +29,12 @@ def chunk(text:str, limit=700, overlap_size= 1) -> list[str]:
     buffer = []
 
     for u in unit:
-        if total_tokens(u.split()) > limit:
+        if estimate_tokens(text) > limit:
             if buffer:
                 chunks.append('\n\n'.join(buffer))
                 buffer = []
             chunks.extend(chunk(u, limit, overlap_size))
-        elif total_tokens(buffer + [u]) <= limit:
+        elif estimate_tokens(" ".join(buffer) + u) <= limit:
             buffer.append(u)
         else:
             chunks.append('\n\n'.join(buffer))

@@ -5,10 +5,11 @@ import asyncio
 from main.tools import Tool
 from main.utils import log
 from .backend import Backend
+from main.events import EventBus
 
 class MultiServer(Backend):
-    def __init__(self, models_list_path:str, system_prompts:dict[str, str], default_system_prompt,) -> None:
-        super().__init__(models_list_path, system_prompts, default_system_prompt)
+    def __init__(self, models_list_path:str, system_prompts:dict[str, str], default_system_prompt, event_bus: None | EventBus = None,) -> None:
+        super().__init__(models_list_path, system_prompts, default_system_prompt, event_bus)
         self.checking_event = asyncio.Event()
 
     def load(self):
