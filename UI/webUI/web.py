@@ -13,7 +13,7 @@ from main.utils import log, estimate_tokens
 from main.configs import USERNAME
 
 app = Quart(__name__)
-ai = AI("main/openrouter_models_configs.json", mode='openrouter')
+ai = AI("main/Models_config.json", mode='openrouter')
 
 def get_greeting():
     now = datetime.datetime.now()
