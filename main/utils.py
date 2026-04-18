@@ -26,7 +26,7 @@ async def log(message: str, level, append = True, stdout = True):
         await f.write(text)
 
 def estimate_tokens(text:str):
-    return len(" ".join(text).split()) * 1.3
+    return len(text.split()) * 1.3
 
 def schemaify(python_type: Any) -> dict: # Before you ask: yes, this is AI generated
     origin = get_origin(python_type)
