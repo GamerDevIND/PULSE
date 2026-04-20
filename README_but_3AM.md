@@ -159,6 +159,8 @@ Then the AI class will handle them like little smart minions slaves
 - **Memory Saving:** Added a confirmation gate for `propose_memory`. The AI can’t just gaslight itself into a hallucination loop without you saying "Okay." (maybe)
 - **CRUD for Memories:** You can now list, update, and delete the shit the AI remembers. Total control, finally.
 - - **Experimental WebUI and multi conversation support**: I've added an experimental WebUI using [`Quart`](https://pypi.org/project/Quart/) and multiple conversation support. BECAUSE THE CLI IS TOO BORING!!!!
+
+- Event Bus prototype because of course
   
 ---
 
