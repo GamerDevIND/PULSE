@@ -52,6 +52,8 @@ Some features I'm told to highlight:
 - **Fixed Generation Cancellation:** Better handling of async task cleanup.
 - **Experimental WebUI and multi conversation support**: I've added an experimental WebUI using [`Quart`](https://pypi.org/project/Quart/) and multiple conversation support.
 
+- Event Bus prototype 
+
 Known major limitations:
 - No tests (yes, I know)
 - Manual FTS indexing can be CPU-heavy on very large datasets.
