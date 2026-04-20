@@ -92,7 +92,15 @@ class Backend:
         model_obj = self.models.get(role)
         return model_obj
     
-    def _init(self):
+    async def _init(self, *tools_list):
+        for model in self.models.values():
+            if isinstance(model, (LocalModel, RemoteModel, OpenRouterModel)):
+                if model.has_tools:
+                    await model.add_tools(*tools_list)
+                if not model.warmed_up:
+                    await model.warm_up()
+                else:
+                    await log(f"{model.name} ({model.model_name}) is already warmed, skipping... This maybe abnormal, please ensure the initilising logic.", 'warn')
         t = asyncio.create_task(self._check_sessions())
         self.running_tasks.add(t)
         t.add_done_callback(self.running_tasks.discard)

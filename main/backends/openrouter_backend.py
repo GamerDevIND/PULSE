@@ -16,16 +16,8 @@ class OpenrouterBackend(Backend):
 
     async def init(self, tools_list:list[Tool]):
         await log("Loading all models...", 'info')
-        for model in self.models.values():
-            if isinstance(model, Model):
-                if model.has_tools:
-                    await model.add_tools(*tools_list)
-                if not model.warmed_up:
-                    await model.warm_up()
-                else:
-                    await log(f"{model.name} ({model.model_name}) is already warmed, skipping... This maybe abnormal, please ensure the initilising logic.", 'warn')
         
-        self._init()
+        await self._init(*tools_list)
 
     async def shutdown(self):
         await log(f"Shutting down Openrouter Backend... (You may ignore any network related issues but double checking is recommended)", "info")
