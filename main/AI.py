@@ -10,7 +10,6 @@ from .backends.multi_server import MultiServer
 from .backends.openrouter_backend import OpenrouterBackend
 from .backends.single_server import SingleServer
 from .backends.backend import Generation
-from .RAG.manager import RAG_manager
 import inspect
 from .events import EventBus
 from .context_manager import ContextManager
@@ -30,7 +29,7 @@ from .configs import (
     
 class AI:
     def __init__(self, model_config_path="main/Models_config.json", context_dir="main/saves/", 
-                 mode:Literal['single'] | Literal['multi'] | Literal['openrouter'] = "multi" , max_turns = 5,  absolute_max_turns = 50, memory_db_path = "./RAG_DB",
+                 mode:Literal['single'] | Literal['multi'] | Literal['openrouter'] = "multi" , max_turns = 5,  absolute_max_turns = 50, use_RAG = True, memory_db_path = "./RAG_DB",
                    table_name = 'memories', summary_max_tokens = 4000, keep_tokens_after_summary = 2000, 
                  min_recent_turns = 3, cache_folder = './cache', 
                  gc_time_limit = 259200, gc_limit_size_MBs = 50, gc_interval = 1800, embedder_auto_warm_up = True, max_memory_rag_chars = 1000):
@@ -43,6 +42,7 @@ class AI:
             'vision': VISION_PROMPT,
             'summarizer': SUMMARIZER_PROMPT,
         }
+        self.use_RAG = use_RAG
         self.system_prompts = {k: v + f"\n\nThe **user's username** is: {USERNAME}" for k, v in self.system_prompts.items()}
         self.default_role = 'chat'
         self.running_tasks = set()
@@ -69,7 +69,11 @@ class AI:
                  min_recent_turns, cache_folder, 
                  gc_time_limit, gc_limit_size_MBs, gc_interval, self.event_bus)
         self.tools_regis = ToolRegistry()
-        self.RAG_Manager = RAG_manager(None, embedder_auto_warm_up, memory_db_path, table_name)
+        if self.use_RAG:
+            from .RAG.manager import RAG_manager
+            self.RAG_Manager = RAG_manager(None, embedder_auto_warm_up, memory_db_path, table_name)
+        else:
+            self.RAG_Manager = None
 
     def load_models(self):
         d = DEFAULT_PROMPT + f"\n\nThe user's username is: {USERNAME}"
@@ -156,13 +160,15 @@ class AI:
 
         if m and not isinstance(m, (RemoteEmbedder, LocalEmbedder, OpenRouterEmbedder)):
             raise TypeError
-
-        self.RAG_Manager.embedder = m
+        if self.RAG_Manager:
+            self.RAG_Manager.embedder = m
 
         async with self.lock:
             self.status = {"status":"Loading conversations and memories", "message": ""}
         await self.context_manager.init()
-        await self.RAG_Manager.load()
+
+        if self.RAG_Manager:
+            await self.RAG_Manager.load()
 
         for t in self.backend.running_tasks:
             self.running_tasks.add(t)
@@ -213,10 +219,13 @@ class AI:
         if not confirmed:
             return "User refused to save to memory. Do not insist."
 
-        await self.RAG_Manager.index_text(
+        if self.RAG_Manager:
+            await self.RAG_Manager.index_text(
             memory, 
             {'source': "User-confirmed model memory"}
-        )
+            )
+        else:
+            return "RAG manager not set for this instance, do not retry without restart!"
         
         return "Memory saved successfully."
     
@@ -224,15 +233,24 @@ class AI:
         if not new or not new.strip() or len(new) < 10:
             return False
         
-        return await self.RAG_Manager.update(mem_id, new)
+        if self.RAG_Manager:
+            return await self.RAG_Manager.update(mem_id, new)
+        else:
+            return False
     
     async def list_memories(self, limit:int = 10, offset:int = 0):
-        return await self.RAG_Manager.list_memories(limit, offset)
+        if self.RAG_Manager:
+            return await self.RAG_Manager.list_memories(limit, offset)
+        else:
+            return []
     
     async def delete_memory(self, mem_id:str):
-        return await self.RAG_Manager.delete(mem_id)
+        if self.RAG_Manager:
+            return await self.RAG_Manager.delete(mem_id)
+        else:
+            return False
     
-    async def get_prompted_query(self, context:list, summary, facts, use_RAG = True, query=""):
+    async def get_prompted_query(self, context:list, summary, facts, use_memory = True, query=""):
 
         '''
         USE THIS METHOD UNDER A LOCK FOR CONCURRENCY SAFETY!
@@ -259,7 +277,11 @@ class AI:
                                            
                 THESE ARE NOT A PART OF THE CONVERSATION. THESE ARE SYSTEM GENERATED PERSISTED MEMORY"""}) # role:system is fatal.
             
-        if use_RAG:
+        if use_memory:
+            if not self.RAG_Manager:
+                await log("RAG manager not set for the instance!", 'error')
+                return context, query
+            
             self.status = {"status": "Retrieving memory...", "message": ""}
             await self.event_bus.parrallel_emit("retrieving memory", query = query)
             rag_results = await self.RAG_Manager.retrieve(query, min_score=RAG_MIN_SCORE)
@@ -300,7 +322,7 @@ class AI:
         return context, query
 
     async def create_generation(self, query, cid= None, stream: None | bool = None, manual_routing=False, think=None, file_path=None, video_frames_mod= 10, 
-                                user_save_prefix = None, save_thinking = True, options = None, format_: dict | None = None, use_RAG = True):
+                                user_save_prefix = None, save_thinking = True, options = None, format_: dict | None = None, use_memory = True):
         if not self.backend:
             await log("No backend provided!", 'error')
             raise
@@ -357,7 +379,7 @@ class AI:
 
         async with self.lock:
             self.status = {"status": "Getting prompts", "message": "Prompting the query for better UX"}
-            context, query = await self.get_prompted_query(context, summary, facts, use_RAG, query)
+            context, query = await self.get_prompted_query(context, summary, facts, use_memory, query)
             print(query)
             self.status = {"status": "Generating session", 'message': ""}
                 
