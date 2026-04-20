@@ -14,7 +14,9 @@ def run_command(args):
 
 async def setup():
     run_command([sys.executable, "-m", "pip", "install", "-r", "requirements.txt"])
-    run_command([sys.executable, "-m", "pip", "install", "-r", "main/RAG/requirements.txt"])
+    rag = input(f"Download the RAG dependences now? (y/n): ").lower().strip() == 'y'
+    if rag:
+        run_command([sys.executable, "-m", "pip", "install", "-r", "main/RAG/requirements.txt"])
     ui = input(f"Download the UI dependences now? (y/n): ").lower().strip() == 'y'
     if ui:
         run_command([sys.executable, "-m", "pip", "install", "-r", "UI/requirements.txt"])
