@@ -111,7 +111,7 @@ class GenerationSession:
                 content_final += content_chunk or ""
 
                 yield (thinking_chunk or "", content_chunk or "")
-                if self.event_bus: await self.event_bus.parrallel_emit(self.event_bus.GENERATION_SESSION, False, chunk = (thinking_chunk or "", content_chunk or "")) 
+                if self.event_bus: await self.event_bus.parrallel_emit(self.event_bus.GENERATION_CHUNK, False, chunk = (thinking_chunk or "", content_chunk or "")) 
         
             await task            
         else:
@@ -132,7 +132,7 @@ class GenerationSession:
                 content_final += content_chunk or ""
 
                 yield (thinking_chunk or "", content_chunk or "")
-                if self.event_bus: await self.event_bus.parrallel_emit(self.event_bus.GENERATION_SESSION, False, chunk = (thinking_chunk or "", content_chunk or "")) 
+                if self.event_bus: await self.event_bus.parrallel_emit(self.event_bus.GENERATION_CHUNK, False, chunk = (thinking_chunk or "", content_chunk or "")) 
 
         if self.query and self.query.strip(): 
             async with self.context_lock:
