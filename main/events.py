@@ -12,7 +12,7 @@ class EventBus:
     GENERATION_STOPPED = "generation stopped"
     GARBAGE_COLLECTOR = 'garbage collector'
     GARBAGE_COLLECTED  = 'garbage collected'
-    SURMMARISING = "summarising"
+    SUMMARISING = "summarising"
     SUMMARISING_FAILED = "summarisation failed"
     SUMMARISED = 'summarised'
     INITIALISING = "initialising"
