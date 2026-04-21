@@ -4,7 +4,7 @@ import asyncio
 import threading
 
 class EventBus:
-    GENERATION_SESSION = "generation chunk"
+    GENERATION_CHUNK = "generation chunk"
     GENERATION_CANCELLED = "generation cancelled"
     TOOL_EXECUTING = "tool executing"
     TOOLS_EXECUTED = "tools executed"
