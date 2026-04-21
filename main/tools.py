@@ -69,6 +69,7 @@ class Tool:
                 retries += 1
                 error = repr(e)
             except asyncio.TimeoutError as e:
+                if self.retry == "none": return ERROR_TOKEN, f"{self.name} timed out"
                 retries += 1
                 error = f"{self.name} timed out on retry: {retries}: {repr(e)}"
             except Exception as e: 
