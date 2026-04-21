@@ -101,7 +101,7 @@ class AI:
                    mode: Literal['single'] | Literal['multi'] | Literal['openrouter'] | None = None, regeneration_consent_callback = None, 
                    mem_save_confirm_callback = None, router_role = "router"): 
         
-        await self.event_bus.parrallel_emit(self.event_bus.INITIALISING)
+        await self.event_bus.parallel_emit(self.event_bus.INITIALISING)
         meta = {
             "needs_regeneration": False,
             "retry": "none",
@@ -176,7 +176,7 @@ class AI:
         async with self.lock:
             self.status = {"status":self.event_bus.INITIALISED, "message": ""}
 
-        await self.event_bus.parrallel_emit(self.event_bus.INITIALISED)
+        await self.event_bus.parallel_emit(self.event_bus.INITIALISED)
                 
     async def cancel_generation(self, session_id:str):
         await self.event_bus.sequence_emit(self.event_bus.CANCELLING_SESSION, session_id = session_id)
@@ -287,7 +287,7 @@ class AI:
                 return context, query
             
             self.status = {"status": "Retrieving memory...", "message": ""}
-            await self.event_bus.parrallel_emit(self.event_bus.RETRIEVING_MEMORY, query = query)
+            await self.event_bus.parallel_emit(self.event_bus.RETRIEVING_MEMORY, query = query)
             rag_results = await self.RAG_Manager.retrieve(query, min_score=RAG_MIN_SCORE)
 
             if rag_results:
@@ -405,7 +405,7 @@ class AI:
 
     async def shut_down(self):
         await log("Shutting Down all services...", "info")
-        await self.event_bus.parrallel_emit(self.event_bus.SHUTTING_DOWN)
+        await self.event_bus.parallel_emit(self.event_bus.SHUTTING_DOWN)
         async with self.lock:
             self.status = {"status": "Shutting down", "message": ""}
 
@@ -423,7 +423,7 @@ class AI:
         else:
             await log("No backend provided! Skipping backend shutdown.", 'error')
         
-        await self.event_bus.parrallel_emit(self.event_bus.SHUTDOWN)
+        await self.event_bus.parallel_emit(self.event_bus.SHUTDOWN)
 
         await log("Full System Offline.", "success")
         

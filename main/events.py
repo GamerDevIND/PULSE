@@ -63,7 +63,7 @@ class EventBus:
             except Exception as e:
                 await log(f"'{event_name}' tried to call function: '{listener.__name__}' with {event}. Error: {repr(e)}. Skipping...", 'warn')
 
-    async def parrallel_emit(self, event_name,should_log = True, **event):
+    async def parallel_emit(self, event_name,should_log = True, **event):
         if should_log: await log(f"Event '{event_name}' emitted with parameter(s): {event}", 'info')
         with self._lock:
             listeners = self.listeners.get(event_name, set())
