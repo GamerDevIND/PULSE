@@ -48,9 +48,15 @@ class Tool:
             try:
 
                 if self.timeout == 'inf':
-                    r = await asyncio.to_thread(self.func, **kwargs) # type:ignore
+                    if inspect.iscoroutinefunction(self.func):
+                        r = await self.func(**kwargs)
+                    else:
+                        r = await asyncio.to_thread(self.func, **kwargs) # type:ignore
                 else:
-                    r  = await asyncio.wait_for(asyncio.to_thread(self.func, **kwargs), self.timeout) # type:ignore
+                    if inspect.iscoroutinefunction(self.func):
+                        r = await asyncio.wait_for(self.func(**kwargs), self.timeout)
+                    else:
+                        r  = await asyncio.wait_for(asyncio.to_thread(self.func, **kwargs), self.timeout) # type:ignore
 
                 if inspect.isawaitable(r):
                     r = await r
