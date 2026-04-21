@@ -60,7 +60,7 @@ async def main():
     def route(role, **_):
         print(f"Routing to {role}")
 
-    @ai.event(ai.event_bus.SURMMARISING)
+    @ai.event(ai.event_bus.SUMMARISING)
     def summarise():
         print("Summarising conversation...")
 
