@@ -12,7 +12,7 @@ from main.utils import log, estimate_tokens
 colorama.init()
 
 async def main():
-    ai = AI("main/openrouter_models_configs.json", mode='openrouter')
+    ai = AI("main/Models_config.json", mode='openrouter')
     await ai.init("cli")
 
     gen = None
