@@ -119,7 +119,7 @@ class ToolRegistry:
 
         if error_token == ERROR_TOKEN:
            await log(f"An error occurred while trying to execute Tool: {tool.name}\nMessage:{result}", "error")
-           result = {"role": "tool","tool_name": tool.name, 'content':f"An error occurred while trying to execute Tool: {tool.name}\nMessage:{result}"}
+           result = f"An error occurred while trying to execute Tool: {tool.name}\nMessage:{result}"
 
         data = {"role": "tool", "tool_name": tool.name, "content": result}
       
