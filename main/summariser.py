@@ -39,7 +39,7 @@ class Summariser:
         
         if estimate_tokens(" ".join(contents)) >= self.summary_max_tokens:  
             if self.event_bus:
-                await self.event_bus.sequence_emit("summarising")
+                await self.event_bus.sequence_emit(self.event_bus.SURMARISING)
             await log("Summarising started", 'info')
             text = '\n'
             chunk_budget = self.summary_max_tokens - self.summary_keep_tokens_after
@@ -113,7 +113,7 @@ class Summariser:
             except Exception as e:  
                 await log(f"Error during summarization: {e}", "error")
                 if self.event_bus:
-                    await self.event_bus.sequence_emit("summarisation_failed", error=str(e))
+                    await self.event_bus.sequence_emit(self.event_bus.SUMMARISING_FAILED, error=str(e))
 
             if entry:
                 try:
@@ -131,5 +131,5 @@ class Summariser:
             # TODO: Trim the context to remove older entries if needed explicitly  
             await log("Summarised successfully", 'success')
             if self.event_bus:
-                await self.event_bus.sequence_emit('summarised', summary = summary, facts = facts, context = context)
+                await self.event_bus.sequence_emit(self.event_bus.SUMMARISED, summary = summary, facts = facts, context = context)
             return summary, facts, context

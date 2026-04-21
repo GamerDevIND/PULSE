@@ -188,7 +188,7 @@ class Generation:
     
     async def stream(self, ):
         if self.event_bus:
-            await self.event_bus.sequence_emit("generation started", gen_id = self.session_id)
+            await self.event_bus.sequence_emit(self.event_bus.GENERATION_STARTED, gen_id = self.session_id)
         try:
             async for (thinking, content) in self.session.generate(self.stream_, self.user_save_prefix, self.think, 
                                                                    self.file_path, self.video_frames_mod, self.save_thinking):
@@ -209,14 +209,14 @@ class Generation:
                 await r
         
         if self.event_bus:
-            await self.event_bus.sequence_emit("generation stopped" , gen_id = self.session_id)
+            await self.event_bus.sequence_emit(self.event_bus.GENERATION_STOPPED , gen_id = self.session_id)
 
     async def terminate(self):
         if self.event_bus:
-            await self.event_bus.sequence_emit("generation terminated",  gen_id = self.session_id)
+            await self.event_bus.sequence_emit(self.event_bus.GENERATION_STOPPED,  gen_id = self.session_id)
         r = self.remove_callback(self.session_id)
         if inspect.isawaitable(r):
             await r
 
         if self.event_bus:
-            await self.event_bus.sequence_emit("generation stopped", gen_id = self.session_id)
+            await self.event_bus.sequence_emit(self.event_bus.GENERATION_STOPPED, gen_id = self.session_id)

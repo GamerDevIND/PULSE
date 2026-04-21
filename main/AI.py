@@ -101,7 +101,7 @@ class AI:
                    mode: Literal['single'] | Literal['multi'] | Literal['openrouter'] | None = None, regeneration_consent_callback = None, 
                    mem_save_confirm_callback = None, router_role = "router"): 
         
-        await self.event_bus.parrallel_emit("initialising")
+        await self.event_bus.parrallel_emit(self.event_bus.INITIALISING)
         meta = {
             "needs_regeneration": False,
             "retry": "none",
@@ -174,12 +174,12 @@ class AI:
             self.running_tasks.add(t)
 
         async with self.lock:
-            self.status = {"status":"Initialised", "message": ""}
+            self.status = {"status":self.event_bus.INITIALISED, "message": ""}
 
-        await self.event_bus.parrallel_emit('initialised')
+        await self.event_bus.parrallel_emit(self.event_bus.INITIALISED)
                 
     async def cancel_generation(self, session_id:str):
-        await self.event_bus.sequence_emit('cancelling session', session_id = session_id)
+        await self.event_bus.sequence_emit(self.event_bus.CANCELLING_SESSION, session_id = session_id)
         if not self.backend:
             await log("No backend provided!", 'error')
             raise
@@ -199,7 +199,7 @@ class AI:
         if not memory or not memory.strip() or len(memory) < 10:
             return "Empty or extrememly short memory. Skipping."
         
-        await self.event_bus.sequence_emit('proposed memory', memory = memory)
+        await self.event_bus.sequence_emit(self.event_bus.PROPOSED_MEMORY, memory = memory)
         
         blacklist = ["i am a language model", "i'm a language model", "i am a god", "i'm a god", "as a helpful assistant", "i think the user", 
                                 "i believe we should remember", "i believe i should remember", "i believe its worth remembering", "i think we should remember", 
@@ -211,12 +211,16 @@ class AI:
         if not self.mem_save_confirm_callback:
             await log("Memory save confirmation callback missing!", "error")
             return "Confirmation system not ready. Skipping."
+        
+        true_calls = [True, 1, "1" ,"true", "y", "yes", "consent", "confirm",]
 
         confirmed = self.mem_save_confirm_callback(memory)
         if inspect.isawaitable(confirmed):
             confirmed = await confirmed
 
-        if not confirmed:
+        if type(confirmed) == str: confirmed = confirmed.lower().strip()
+
+        if not confirmed in true_calls:
             return "User refused to save to memory. Do not insist."
 
         if self.RAG_Manager:
@@ -283,7 +287,7 @@ class AI:
                 return context, query
             
             self.status = {"status": "Retrieving memory...", "message": ""}
-            await self.event_bus.parrallel_emit("retrieving memory", query = query)
+            await self.event_bus.parrallel_emit(self.event_bus.RETRIEVING_MEMORY, query = query)
             rag_results = await self.RAG_Manager.retrieve(query, min_score=RAG_MIN_SCORE)
 
             if rag_results:
@@ -327,7 +331,7 @@ class AI:
             await log("No backend provided!", 'error')
             raise
 
-        await self.event_bus.sequence_emit("creating session")
+        await self.event_bus.sequence_emit(self.event_bus.CREATING_SESSION)
 
         cid = cid or self.last_cid
         if not cid:
@@ -347,13 +351,13 @@ class AI:
         async with self.lock:
             self.status = {"status":"Routing", "message": ""}
         
-        await self.event_bus.sequence_emit("routing")
+        await self.event_bus.sequence_emit(self.event_bus.ROUTING)
 
         query, role = await self.router.route_query(query, context, manual_routing) if self.router else (query, self.default_role)
         if not role:
             role = self.default_role
 
-        await self.event_bus.sequence_emit("routing role", role = role)
+        await self.event_bus.sequence_emit(self.event_bus.ROUTING_ROLE, role = role)
 
         async with self.lock:
             self.status['message'] = f"Routing to: {role}"
@@ -395,13 +399,13 @@ class AI:
         async with self.lock:
             self.status = {"status": "Session generation succcessful", "message": ""}
         
-        await self.event_bus.sequence_emit('session created')
+        await self.event_bus.sequence_emit(self.event_bus.SESSION_CREATED)
         
         return gen
 
     async def shut_down(self):
         await log("Shutting Down all services...", "info")
-        await self.event_bus.parrallel_emit('shutting down')
+        await self.event_bus.parrallel_emit(self.event_bus.SHUTTING_DOWN)
         async with self.lock:
             self.status = {"status": "Shutting down", "message": ""}
 
@@ -419,7 +423,7 @@ class AI:
         else:
             await log("No backend provided! Skipping backend shutdown.", 'error')
         
-        await self.event_bus.parrallel_emit('shut down')
+        await self.event_bus.parrallel_emit(self.event_bus.SHUTDOWN)
 
         await log("Full System Offline.", "success")
         

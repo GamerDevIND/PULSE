@@ -13,7 +13,7 @@ from main.utils import log, estimate_tokens
 from main.configs import USERNAME
 
 app = Quart(__name__)
-ai = AI("main/Models_config.json", mode='openrouter')
+ai = AI("main/openrouter_models_configs.json", mode='openrouter')
 
 def get_greeting():
     now = datetime.datetime.now()
@@ -119,7 +119,7 @@ async def send_message(cid):
     data = await request.get_json()
     query = data.get('message')
     
-    gen = await ai.create_generation(query, cid=cid, use_RAG=False)
+    gen = await ai.create_generation(query, cid=cid, use_memory=False)
 
     if not gen:
         return jsonify({"error": "Generation failed"}), 500

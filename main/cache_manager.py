@@ -39,14 +39,14 @@ class GarbageCollector:
             if (now - data['last_used']) > self.time_limit:
                 if os.path.exists(data['path']):
                     if self.event_bus:
-                        await self.event_bus.sequence_emit('garbage collector', path = data['path'])
+                        await self.event_bus.sequence_emit(self.event_bus.GARBAGE_COLLECTOR, path = data['path'])
                     await asyncio.to_thread(os.remove, data['path'])
                 keys_to_delete.append(hash_key)
             
             elif data['size'] > self.size_threshold_in_mbs and (now - data['last_used']) > (self.time_limit // 2):
                 if os.path.exists(data['path']):
                     if self.event_bus:
-                        await self.event_bus.sequence_emit('garbage collector', path = data['path'])
+                        await self.event_bus.sequence_emit(self.event_bus.GARBAGE_COLLECTOR, path = data['path'])
                     await asyncio.to_thread(os.remove, data['path'])
                 keys_to_delete.append(hash_key)
             
@@ -64,13 +64,13 @@ class GarbageCollector:
                     break
                 try:
                     if self.event_bus:
-                        await self.event_bus.sequence_emit('garbage collector', path = data['path'])
+                        await self.event_bus.sequence_emit(self.event_bus.GARBAGE_COLLECTOR, path = data['path'])
                     await asyncio.to_thread(os.remove, index[k]['path'])
                     current_size -= index[k]['size']
                     del index[k]
                 except: pass
         if self.event_bus:
-            await self.event_bus.sequence_emit('garbage collected')
+            await self.event_bus.sequence_emit(self.event_bus.GARBAGE_COLLECTED)
         return index
 
 class CacheManager:

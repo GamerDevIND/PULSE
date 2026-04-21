@@ -111,7 +111,7 @@ class GenerationSession:
                 content_final += content_chunk or ""
 
                 yield (thinking_chunk or "", content_chunk or "")
-                if self.event_bus: await self.event_bus.parrallel_emit("generation chunk", False, chunk = (thinking_chunk or "", content_chunk or "")) 
+                if self.event_bus: await self.event_bus.parrallel_emit(self.event_bus.GENERATION_SESSION, False, chunk = (thinking_chunk or "", content_chunk or "")) 
         
             await task            
         else:
@@ -132,7 +132,7 @@ class GenerationSession:
                 content_final += content_chunk or ""
 
                 yield (thinking_chunk or "", content_chunk or "")
-                if self.event_bus: await self.event_bus.parrallel_emit("generation chunk", False, chunk = (thinking_chunk or "", content_chunk or "")) 
+                if self.event_bus: await self.event_bus.parrallel_emit(self.event_bus.GENERATION_SESSION, False, chunk = (thinking_chunk or "", content_chunk or "")) 
 
         if self.query and self.query.strip(): 
             async with self.context_lock:
@@ -182,7 +182,7 @@ class GenerationSession:
         finally:
             await self.change_state(CANCELLED)
             if self.event_bus:
-                await self.event_bus.sequence_emit("generation cancelled", gen_id = self.id)
+                await self.event_bus.sequence_emit(self.event_bus.GENERATION_CANCELLED, gen_id = self.id)
 
     async def get_context(self):
         async with self.context_lock:
@@ -243,7 +243,7 @@ class GenerationSession:
             c_id = tool.get('call_id')
             tool_idx = func.get('index')
             if self.event_bus:
-                await self.event_bus.sequence_emit("tool executing", tool_name= tool_name, session_id = self.id)
+                await self.event_bus.sequence_emit(self.event_bus.TOOL_EXECUTING, tool_name= tool_name, session_id = self.id)
 
             tool_args = func.get('arguments', {}) 
             
@@ -284,5 +284,5 @@ class GenerationSession:
           
         await self._check_regen(tools_objs)   
         if self.event_bus and (tools_objs or results):
-            await self.event_bus.sequence_emit("tools executed", session_id = self.id)
+            await self.event_bus.sequence_emit(self.event_bus.TOOLS_EXECUTED, session_id = self.id)
         return results

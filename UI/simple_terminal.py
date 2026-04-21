@@ -12,7 +12,7 @@ from main.utils import log, estimate_tokens
 colorama.init()
 
 async def main():
-    ai = AI("main/Models_config.json", mode='openrouter')
+    ai = AI("main/openrouter_models_configs.json", mode='openrouter')
     await ai.init("cli")
 
     gen = None
@@ -29,46 +29,46 @@ async def main():
     sigint_state = {"count": 0, "last": 0.0}
     SIGINT_WINDOW = 3.0
 
-    @ai.event("initialising")
+    @ai.event(ai.event_bus.INITIALISING)
     def p():
         print("Initialising...")
 
-    @ai.event("initialised")
+    @ai.event(ai.event_bus.INITIALISED)
     def r():
         print("initialised")
 
-    @ai.event("shutting down")
+    @ai.event(ai.event_bus.SHUTTING_DOWN)
     async def a():
         await shutdown()
-    ai.event("shut down")
+    ai.event(ai.event_bus.SHUTDOWN)
     def b():
         print("Shut down successful")
 
-    ai.event("cancelling session")
+    ai.event(ai.event_bus.CANCELLING_SESSION)
     def cancel(**_):
         print(f"Session: was cancelled")
 
-    @ai.event("retrieving memory")
+    @ai.event(ai.event_bus.RETRIEVING_MEMORY)
     def rag(query, **_):
         print(f"Retrieving memory for {query}")
 
-    @ai.event('garbage collector')
+    @ai.event(ai.event_bus.GARBAGE_COLLECTOR)
     def gc(path, **_):
         print(f"Garbage collector cleaning: {path}")
     
-    @ai.event("routing role")
+    @ai.event(ai.event_bus.ROUTING_ROLE)
     def route(role, **_):
         print(f"Routing to {role}")
 
-    @ai.event("summarising")
-    def sumarise():
+    @ai.event(ai.event_bus.SURMARISING)
+    def summarise():
         print("Summarising conversation...")
 
-    @ai.event("tool executing")
+    @ai.event(ai.event_bus.TOOL_EXECUTING)
     def tool(tool_name, **_):
         print(f"Executing tool :{tool_name}")
         
-    ai.event("tools executed")
+    ai.event(ai.event_bus.TOOLS_EXECUTED)
     def tools(**_):
         print("Tools executed")
 

@@ -1,32 +1,60 @@
 from .utils import log
 import inspect
 import asyncio
+import threading
 
 class EventBus:
+    GENERATION_SESSION = "generation chunk"
+    GENERATION_CANCELLED = "generation cancelled"
+    TOOL_EXECUTING = "tool executing"
+    TOOLS_EXECUTED = "tools executed"
+    GENERATION_STARTED = "generation started"
+    GENERATION_STOPPED = "generation stopped"
+    GARBAGE_COLLECTOR = 'garbage collector'
+    GARBAGE_COLLECTED  = 'garbage collected'
+    SURMARISING = "summarising"
+    SUMMARISING_FAILED = "summarisation failed"
+    SUMMARISED = 'summarised'
+    INITIALISING = "initialising"
+    INITIALISED = "initialised"
+    PROPOSED_MEMORY = 'proposed memory'
+    CANCELLING_SESSION = 'cancelling session'
+    RETRIEVING_MEMORY = "retrieving memory"
+    CREATING_SESSION = "creating session"
+    ROUTING = "routing"
+    ROUTING_ROLE = "routing role"
+    SESSION_CREATED = 'session created'
+    SHUTTING_DOWN = 'shutting down'
+    SHUTDOWN = 'shut down'
+
     def  __init__(self) -> None:
         self.listeners:dict[str, set] = {}
+        self._lock = threading.RLock()
 
     def add_listener(self, event_name:str, listener):
         print(f"Adding {listener.__name__} to event '{event_name}'")
-        if not self.listeners.get(event_name):
-            self.listeners[event_name] = {listener}
-        else:
-            self.listeners[event_name].add(listener)
+        with self._lock:
+            if not self.listeners.get(event_name):
+                self.listeners[event_name] = {listener}
+            else:
+                self.listeners[event_name].add(listener)
 
     def remove_listener(self, event_name:str, listener):
         print(f"Removing {listener.__name__} from event '{event_name}'")
-        l = self.listeners.get(event_name)
-        if not l:
-            print(f"{listener.__name__} doesn't exist for event '{event_name}'", 'warn')
-            return
-        
-        self.listeners[event_name].remove(listener)
-        if len(self.listeners[event_name]) < 1:
-            del self.listeners[event_name]
+        with self._lock:
+            l = self.listeners.get(event_name)
+            if not l:
+                print(f"{listener.__name__} doesn't exist for event '{event_name}'", 'warn')
+                return
+            
+            self.listeners[event_name].remove(listener)
+            if len(self.listeners[event_name]) < 1:
+                del self.listeners[event_name]
 
     async def sequence_emit(self, event_name,should_log = True, **event):
         if should_log: await log(f"Event '{event_name}' emitted with parameter(s): {event}", 'info')
-        listeners = self.listeners.get(event_name, set())
+        with self._lock:
+            listeners = self.listeners.get(event_name, set())
         for listener in list(listeners):
             try:
                 f = listener(**event)
@@ -37,7 +65,8 @@ class EventBus:
 
     async def parrallel_emit(self, event_name,should_log = True, **event):
         if should_log: await log(f"Event '{event_name}' emitted with parameter(s): {event}", 'info')
-        listeners = self.listeners.get(event_name, set())
+        with self._lock:
+            listeners = self.listeners.get(event_name, set())
         l = []
         for listener in list(listeners):
             if inspect.iscoroutinefunction(listener):
