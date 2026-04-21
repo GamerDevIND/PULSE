@@ -194,15 +194,15 @@ class CacheManager:
         l = []
 
         for msg in reversed(resolved_context):
-            if file_name_key in msg:
+            if file_name_key in msg and msg[file_name_key]:
                 found_files += 1
                 if found_files > max_keeps:
                     file_name = msg.pop(file_name_key, "Unknown File")
-                    # note = f"\n\n[System: Media '{file_name}' removed from active memory.]"
-                    # if isinstance(msg["content"], str):
-                    #     msg["content"] += note # we're deep copying  the context, no worries
-                    # elif isinstance(msg["content"], list):
-                    #     msg["content"].append({"type": "text", "text": note})
+                    note = f"\n\n[System: Media '{file_name}' removed from active memory.]"
+                    if isinstance(msg["content"], str):
+                        msg["content"] += note
+                    elif isinstance(msg["content"], list):
+                        msg["content"].append({"type": "text", "text": note})
             
             l.append(msg)
 
