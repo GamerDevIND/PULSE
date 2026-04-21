@@ -1,6 +1,6 @@
 # P.U.L.S.E.
 
-Personal Unified Logic System Entity (v1.3.5 - pre-beta)
+Personal Unified Logic System Entity (v1.3.5 - Backend)
 
 This is the polite version of the README.
 
