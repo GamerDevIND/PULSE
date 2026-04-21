@@ -39,7 +39,7 @@ class Summariser:
         
         if estimate_tokens(" ".join(contents)) >= self.summary_max_tokens:  
             if self.event_bus:
-                await self.event_bus.sequence_emit(self.event_bus.SURMARISING)
+                await self.event_bus.sequence_emit(self.event_bus.SURMMARISING)
             await log("Summarising started", 'info')
             text = '\n'
             chunk_budget = self.summary_max_tokens - self.summary_keep_tokens_after

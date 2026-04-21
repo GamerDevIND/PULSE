@@ -68,8 +68,12 @@ class Tool:
                     return ERROR_TOKEN, repr(e)
                 retries += 1
                 error = repr(e)
+            except asyncio.TimeoutError as e:
+                retries += 1
+                error = f"{self.name} timed out on retry: {retries}: {repr(e)}"
             except Exception as e: 
                 return ERROR_TOKEN, repr(e)
+
         return ERROR_TOKEN, error
 
 class ToolRegistry:
@@ -79,6 +83,8 @@ class ToolRegistry:
     @classmethod
     def register(cls, func, meta):
         with cls._lock:
+            if func.__name__ in cls._tools:
+                raise ValueError(f"Tool {func.__name__} already registered!")
             cls._tools[func.__name__] = Tool(func, meta)
 
     def __init__(self):
