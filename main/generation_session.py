@@ -47,7 +47,7 @@ class GenerationSession:
         self.regen_consent_callback = regen_consent_callback
         self.regen = False
         self.event_bus = event_bus
-    
+
     async def change_state(self, new, use_lock = True):
         if use_lock:
             async with self.state_lock: 
@@ -65,7 +65,7 @@ class GenerationSession:
 
             yield (ERROR_TOKEN, ERROR_TOKEN)
             return
-        
+
         await self.change_state(GENERATING)
 
         content_final = ""
@@ -84,7 +84,7 @@ class GenerationSession:
 
                         if content_chunk == ERROR_TOKEN:
                             await self.change_state(FAIL)
-                            
+
                             break
                         await queue.put((thinking_chunk, content_chunk, tools_chunk))
                 except asyncio.CancelledError:
@@ -97,7 +97,7 @@ class GenerationSession:
 
             task = asyncio.create_task(producer())
             self.generation_task = task
-            
+
             while True:
                 item = await queue.get()
                 if item is None:
@@ -112,7 +112,7 @@ class GenerationSession:
 
                 yield (thinking_chunk or "", content_chunk or "")
                 if self.event_bus: await self.event_bus.parallel_emit(self.event_bus.GENERATION_CHUNK, False, chunk = (thinking_chunk or "", content_chunk or "")) 
-        
+
             await task            
         else:
            async for (thinking_chunk, content_chunk, tools_chunk) in self.model.generate(query, self.context, False,
@@ -137,7 +137,7 @@ class GenerationSession:
         if self.query and self.query.strip(): 
             async with self.context_lock:
                 self.context.append({'role': 'user', 'content': query, FILE_NAME_KEY : image_path})
-        
+
         if save_thinking:
             m = {'role': 'assistant', 'thinking': thinking_final, 'content': content_final, 'tool_calls': tools_called} 
         else: 
@@ -148,13 +148,14 @@ class GenerationSession:
 
         self.generation_task = None
         await self.execute_tools(tools_called)
-        
+
         await self.change_state(DONE)
-        
+
     async def _ask_user_consent(self):
         if not self.regen_consent_callback: return False
         true_calls = [True, 1, "1" ,"true", "y", "yes", "consent", "confirm",]
         try:
+            await self.event_bus.sequence_emit(self.event_bus.PROPOSED_REGEN)
             result = self.regen_consent_callback() # type:ignore
             if inspect.isawaitable(result): result = await result 
             if type(result) == str: result = result.lower().strip()
@@ -170,7 +171,7 @@ class GenerationSession:
 
         await self.change_state(CANCELLING)
         try:
-                
+
             if self.generation_task:
                 if not self.generation_task.done():
                     self.generation_task.cancel()
@@ -187,7 +188,7 @@ class GenerationSession:
     async def get_context(self):
         async with self.context_lock:
             return deepcopy(self.context)
-    
+
     async def set_context(self, context):
         async with self.context_lock:
             self.context = context
@@ -198,7 +199,7 @@ class GenerationSession:
                 yield thinking, response
             if not self.regen: break
 
-    
+
     async def _check_regen(self, tools:Iterable[Tool]):
         regen = any(t.needs_regeneration for t in tools)
         if regen:
@@ -231,7 +232,7 @@ class GenerationSession:
         tools_objs = []  
         if not tools:  
             return results  
-  
+
         for tool in tools:  
             if not isinstance(tool, dict) or 'function' not in tool:  
                 await log(f"Invalid tool format: {tool}", "warn")  
@@ -246,22 +247,22 @@ class GenerationSession:
                 await self.event_bus.sequence_emit(self.event_bus.TOOL_EXECUTING, tool_name= tool_name, session_id = self.id)
 
             tool_args = func.get('arguments', {}) 
-            
+
             if isinstance(tool_args, str):
                 try:
                     tool_args = json.loads(tool_args)
                 except json.JSONDecodeError:
                     await log(f"Failed to parse tool arguments for {tool_name}: {tool_args}", "error")
                     continue
-            
+
             if not isinstance(tool_args, dict):
                 await log(f"Arguments for {tool_name} are not a dictionary. Skipping...", "warn")
                 continue
-  
+
             if not tool_name in self.tools_regis.tools.keys():  
                 await log(f"{tool_name} is not in the registory. Skipping...", 'warn')  
                 continue  
-  
+
             result = await self.tools_regis.execute_tool(tool_name=tool_name, **tool_args)
             if result is None:
                 await log(f"An error occured in the tools execution; Tool Name: {tool_name} Skipping...", 'warn')
@@ -272,7 +273,7 @@ class GenerationSession:
             if call_id and not tool_idx:
                 result["tool_call_id"] = call_id
                 if c_id: result["call_id"] = c_id
-            
+
             if not call_id and tool_idx:
                 result["index"] = tool_idx  
 
@@ -281,7 +282,7 @@ class GenerationSession:
 
         async with self.context_lock: 
             self.context.extend(results)
-          
+
         await self._check_regen(tools_objs)   
         if self.event_bus and (tools_objs or results):
             await self.event_bus.sequence_emit(self.event_bus.TOOLS_EXECUTED, session_id = self.id)
