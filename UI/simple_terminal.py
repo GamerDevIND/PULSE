@@ -12,7 +12,7 @@ from main.utils import log, estimate_tokens
 colorama.init()
 
 async def main():
-    ai = AI("main/Models_config.json", mode='multi')
+    ai = AI("main/Models_config.json", mode='openrouter', use_RAG=False)
     await ai.init("cli")
 
     gen = None
@@ -74,6 +74,8 @@ async def main():
 
     async def _on_sigint():
         now = loop.time()
+        if shutdown_event.is_set():
+            return
         if sigint_state["count"] == 0 or (now - sigint_state["last"]) > SIGINT_WINDOW:
             sigint_state["count"] = 1
             sigint_state["last"] = now
@@ -140,7 +142,7 @@ async def main():
                 await log("No image path. Continuing with text only.", "warn")
 
         try:
-            gen = await ai.create_generation(req, manual_routing=False, file_path=image_path)
+            gen = await ai.create_generation(req, manual_routing=False, file_path=image_path, use_memory=False)
 
             if not gen:
                 return
