@@ -196,7 +196,7 @@ class AI:
         `memory` field takes a string (the actual memory to be saved) and saves it to the long term memory if the user confirms so.
         '''
 
-        if not memory or not memory.strip() or len(memory) < 10:
+        if not memory or not memory.strip() or len(memory) < 5:
             return "Empty or extrememly short memory. Skipping."
         
         await self.event_bus.sequence_emit(self.event_bus.PROPOSED_MEMORY, memory = memory)
