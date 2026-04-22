@@ -7,10 +7,12 @@ from .generation_session import GenerationSession
 from .summariser import Summariser
 from .backends.multi_server import MultiServer
 from .backends.single_server import SingleServer
+from .backends.openrouter_backend import OpenrouterBackend
 from .models.model_instance import LocalModel
+from .models.openrouter_model import OpenRouterModel, OpenRouterEmbedder
 from .models.models_profile import RemoteModel
 from .tools import tool, Tool, ToolRegistry
 from.resource_manager import ResourceManager, SessionManager
 
-__all__ = ["AI", "OllamaModel", "OllamaEmbedder", "log", 'tool', "ContextManager", "GenerationSession", "Summariser", "MultiServer", "SingleServer", 
-           "LocalModel", "RemoteModel", "GarbageCollector", "Tool", "ToolRegistry", "ResourceManager", "SessionManager"]
+__all__ = ["AI", "Backend", "OpenrouterBackend", "OpenRouterModel", "OpenRouterEmbedder", "OllamaModel", "OllamaEmbedder", "log", 'tool', "ContextManager", "GenerationSession", "Summariser", "MultiServer", "SingleServer", 
+           "LocalModel", "RemoteModel", "Tool", "ToolRegistry", "ResourceManager", "SessionManager"]
