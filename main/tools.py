@@ -19,7 +19,7 @@ def tool(
             "needs_regeneration": needs_regeneration,
             "retry": retry,
             "max_retries": max_retries,
-            "retry_on": retry_on or (),
+            "retry_on": retry_on or (SystemExit,),
             "timeout": timeout_secs
         }
         func.__meta__ = metadata
