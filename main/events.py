@@ -76,6 +76,8 @@ class EventBus:
                 t = asyncio.to_thread(listener, **event)
                 l.append(t)
 
+        if not l: return
+
         results = await asyncio.gather(*l, return_exceptions=True)
         for r in results:
             if isinstance(r, asyncio.CancelledError): raise r
