@@ -132,14 +132,7 @@ class AI:
         async with self.lock:
             self.status = {"status":"Warming up models", "message": "Warming up models for inference..."}
         
-        meta = {
-            "needs_regeneration": False,
-            "retry": "none",
-            "max_retries": 1,
-            "retry_on": (Exception,)
-        }
-
-        self.tools_regis.register(self.propose_memory, meta)
+        
 
         await self.backend.init(self.tools_regis.list_tools())
 
