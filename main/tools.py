@@ -60,7 +60,7 @@ class Tool:
 
                 if inspect.isawaitable(r):
                     r = await r
-                    
+
                 return None, r
 
             except retry_on as e:
@@ -78,30 +78,32 @@ class Tool:
         return ERROR_TOKEN, error
 
 class ToolRegistry:
-    _tools = {}
+    _tools:dict[str, Tool] = {}
     _lock = threading.RLock()
 
     @classmethod
     def register(cls, func, meta):
         with cls._lock:
             if func.__name__ in cls._tools:
-                raise ValueError(f"Tool {func.__name__} already registered!")
+                print(f"Tool {func.__name__} already registered!")
+                print(f"Tools listed: {ToolRegistry._tools.keys()}")
+                return
             cls._tools[func.__name__] = Tool(func, meta)
 
     def __init__(self):
         with ToolRegistry._lock:
             self.tools = ToolRegistry._tools.copy()
- 
+
 
     def clear(self):
         with ToolRegistry._lock: self.tools.clear()
-     
+
     def clear_global(self):
         with ToolRegistry._lock: ToolRegistry._tools.clear()
 
     def list_tools(self):
         return list(self.tools.values())
-    
+
     def list_tools_global(self):
         return list(ToolRegistry._tools.values())
 
@@ -123,7 +125,7 @@ class ToolRegistry:
            result = f"An error occurred while trying to execute Tool: {tool.name}\nMessage:{result}"
 
         data = {"role": "tool", "tool_name": tool.name, "content": result}
-      
+
         return data, tool
 
     def get(self, name):
