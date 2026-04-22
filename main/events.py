@@ -12,12 +12,13 @@ class EventBus:
     GENERATION_STOPPED = "generation stopped"
     GARBAGE_COLLECTOR = 'garbage collector'
     GARBAGE_COLLECTED  = 'garbage collected'
-    SUMMARISING = "summarising"
+    SURMMARISING = "summarising"
     SUMMARISING_FAILED = "summarisation failed"
     SUMMARISED = 'summarised'
     INITIALISING = "initialising"
     INITIALISED = "initialised"
     PROPOSED_MEMORY = 'proposed memory'
+    PROPOSED_REGEN = "propose regen"
     CANCELLING_SESSION = 'cancelling session'
     RETRIEVING_MEMORY = "retrieving memory"
     CREATING_SESSION = "creating session"
@@ -46,7 +47,7 @@ class EventBus:
             if not l:
                 print(f"{listener.__name__} doesn't exist for event '{event_name}'", 'warn')
                 return
-            
+
             self.listeners[event_name].remove(listener)
             if len(self.listeners[event_name]) < 1:
                 del self.listeners[event_name]
