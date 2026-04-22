@@ -68,7 +68,7 @@ class GarbageCollector:
                     await asyncio.to_thread(os.remove, index[k]['path'])
                     current_size -= index[k]['size']
                     del index[k]
-                except: pass
+                except Exception as e: await log(f"Error deleting: {index[k]['path']}: {repr(e)}", "error")
         if self.event_bus:
             await self.event_bus.sequence_emit(self.event_bus.GARBAGE_COLLECTED)
         return index
