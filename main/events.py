@@ -48,7 +48,7 @@ class EventBus:
                 print(f"{listener.__name__} doesn't exist for event '{event_name}'", 'warn')
                 return
 
-            self.listeners[event_name].remove(listener)
+            self.listeners[event_name].discard(listener)
             if len(self.listeners[event_name]) < 1:
                 del self.listeners[event_name]
 
