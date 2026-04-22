@@ -253,6 +253,7 @@ class AI:
         '''
         USE THIS METHOD UNDER A LOCK FOR CONCURRENCY SAFETY!
         '''
+        context = deepcopy(context)
 
         f = f"""
             The system has also generated a set of facts extracted from the previous turns. These are still lossy facts and maybe inaccurate. 
