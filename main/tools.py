@@ -1,5 +1,4 @@
 from .utils import convert_funcs, log
-from .configs import ERROR_TOKEN
 import inspect 
 import threading
 import asyncio
@@ -19,7 +18,7 @@ def tool(
             "needs_regeneration": needs_regeneration,
             "retry": retry,
             "max_retries": max_retries,
-            "retry_on": retry_on or (SystemExit,),
+            "retry_on": retry_on or tuple(),
             "timeout": timeout_secs
         }
         func.__meta__ = metadata
@@ -41,7 +40,7 @@ class Tool:
     async def execute(self, **kwargs):
         retries = 0
         error = f"An error occurred executing {self.name}" # fallback 
-        retry_on = tuple(self.retry_on) or ()
+        retry_on = tuple(self.retry_on) or tuple()
 
         total_attempts = self.max_retry + 1
         while retries < total_attempts:
@@ -62,20 +61,23 @@ class Tool:
                     r = await r
 
                 return None, r
-
-            except retry_on as e:
-                if self.retry == "none": 
-                    return ERROR_TOKEN, repr(e)
-                retries += 1
-                error = repr(e)
             except asyncio.TimeoutError as e:
-                if self.retry == "none": return ERROR_TOKEN, f"{self.name} timed out"
+                if self.retry == "none": return True, f"{self.name} timed out"
                 retries += 1
                 error = f"{self.name} timed out on retry: {retries}: {repr(e)}"
             except Exception as e: 
-                return ERROR_TOKEN, repr(e)
+                if retry_on:
+                    if isinstance(e, retry_on):
+                        if self.retry == "none": 
+                            return True, repr(e)
+                        retries += 1
+                        error = repr(e)
+                    else:
+                        return True, repr(e)
+                else:
+                    return True, repr(e)
 
-        return ERROR_TOKEN, error
+        return True, error
 
 class ToolRegistry:
     _tools:dict[str, Tool] = {}
@@ -118,9 +120,9 @@ class ToolRegistry:
            await log("tool not found / provided. skipping execution", "warn")
            return {"role": "tool", "tool_name": "N/A", "content": "Error: Tool not found. Answer directly or request a valid tool"}, tool
 
-        error_token, result = await tool.execute(**kwargs)
+        error, result = await tool.execute(**kwargs)
 
-        if error_token == ERROR_TOKEN:
+        if error:
            await log(f"An error occurred while trying to execute Tool: {tool.name}\nMessage:{result}", "error")
            result = f"An error occurred while trying to execute Tool: {tool.name}\nMessage:{result}"
 
