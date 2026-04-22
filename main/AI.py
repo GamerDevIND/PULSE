@@ -106,7 +106,8 @@ class AI:
             "needs_regeneration": False,
             "retry": "none",
             "max_retries": 1,
-            "retry_on": (Exception,)
+            "retry_on": (Exception,),
+            "timeout": 'inf'
         }
         self.tools_regis.register(self.propose_memory, meta)
 
