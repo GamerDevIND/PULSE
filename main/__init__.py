@@ -9,7 +9,6 @@ from .backends.multi_server import MultiServer
 from .backends.single_server import SingleServer
 from .models.model_instance import LocalModel
 from .models.models_profile import RemoteModel
-from .garbage_collector import GarbageCollector
 from .tools import tool, Tool, ToolRegistry
 from.resource_manager import ResourceManager, SessionManager
 
