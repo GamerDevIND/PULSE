@@ -64,7 +64,7 @@ class GarbageCollector:
                     break
                 try:
                     if self.event_bus:
-                        await self.event_bus.sequence_emit(self.event_bus.GARBAGE_COLLECTOR, path = data['path'])
+                        await self.event_bus.sequence_emit(self.event_bus.GARBAGE_COLLECTOR, path = index[k]['path'])
                     await asyncio.to_thread(os.remove, index[k]['path'])
                     current_size -= index[k]['size']
                     del index[k]
