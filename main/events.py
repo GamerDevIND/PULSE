@@ -78,5 +78,6 @@ class EventBus:
 
         results = await asyncio.gather(*l, return_exceptions=True)
         for r in results:
+            if isinstance(r, asyncio.CancelledError): raise r
             if isinstance(r, Exception):
                 await log(f"'{event_name}' error: {repr(r)}. Skipping...", 'warn')
