@@ -94,10 +94,10 @@ class ToolRegistry:
  
 
     def clear(self):
-        self.tools.clear()
+        with ToolRegistry._lock: self.tools.clear()
      
     def clear_global(self):
-        ToolRegistry._tools.clear()
+        with ToolRegistry._lock: ToolRegistry._tools.clear()
 
     def list_tools(self):
         return list(self.tools.values())
