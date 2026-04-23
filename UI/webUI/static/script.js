@@ -107,43 +107,54 @@ document.addEventListener('DOMContentLoaded', () => {
             let currentThinking = "";
             let currentContent = "";
             let receivedChatId = false;
-
+            let buffer = "";
             while (true) {
                 const { value, done } = await reader.read();
+            
                 if (done) break;
-                
-                const chunk = decoder.decode(value);
-                const lines = chunk.split('\n');
-                
+            
+                buffer += decoder.decode(value, { stream: true });
+            
+                const lines = buffer.split('\n');
+            
+                buffer = lines.pop(); // keep incomplete last line
+            
                 for (const line of lines) {
-                    if (!line) continue;
+                    if (!line.trim()) continue;
+            
                     try {
                         const data = JSON.parse(line);
-                        
+            
                         if (data.chat_id && !receivedChatId) {
                             currentChatId = data.chat_id;
                             receivedChatId = true;
                             window.history.pushState({}, '', `/chat/${currentChatId}`);
                         }
-
+            
                         if (data.thinking) {
                             if (thinkingWrapper) thinkingWrapper.style.display = 'block';
                             currentThinking += data.thinking;
+            
                             if (thinkingArea) {
-                                thinkingArea.innerText = currentThinking;
-                                thinkingArea.innerText = thinkingArea.innerText.replace(/^\n+/, "")
+                                thinkingArea.innerHTML =
+                                    currentThinking.replace(/^\n+/, "").replace(/\n/g, "<br>");
+                            }
                         }
-                        }
-
+            
                         if (data.content) {
-                            if (contentArea.innerText === "Generating...") contentArea.innerText = "";
+                            if (contentArea.innerText === "Generating...") {
+                                contentArea.innerText = "";
+                            }
+            
                             currentContent += data.content;
+                            contentArea.innerHTML =
+                                currentContent.replace(/^\n+/, "").replace(/\n/g, "<br>");
                         }
-                        contentArea.innerText = currentContent
-                        contentArea.innerText = contentArea.innerText.replace(/^\n+/, "")
-                        
+            
                         chatDisplay.scrollTop = chatDisplay.scrollHeight;
-                    } catch (e) { console.error("JSON parse error", e); }
+                    } catch (e) {
+                        console.error("JSON parse error:", line, e);
+                    }
                 }
             }
         } catch (error) {
@@ -166,10 +177,10 @@ document.addEventListener('DOMContentLoaded', () => {
         msgDiv.classList.add(`${role}-message`);
         
         if (role === 'assistant') {
-            contentDiv.innerHTML = text.replace("\n", '<br>') ? text : "Generating...";
+            contentDiv.innerHTML = text ? text.replace(/\n/g, '<br>') : "Generating...";
         } else {
             if (!text) return;
-            const cleanText = text.replace(/^.*?: /, "").replace("\n", '<br>');
+            const cleanText = text.replace(/^.*?: /, "").replace(/\n/g, '<br>');
             contentDiv.innerHTML = cleanText;
         }
 
@@ -189,7 +200,7 @@ async function checkStatus() {
         const data = await res.json();
         const status = (typeof data === 'string' ? data : data.status).toLowerCase();
         
-        if (statusText) statusText.innerText = status.toUpperCase();
+        if (statusText) statusText.decoder = status.toUpperCase();
 
     } catch (e) {}
     setTimeout(checkStatus, 800);
