@@ -32,7 +32,7 @@ async def setup():
             print("Please download Ollama for your OS: https://ollama.com/download")
             return
         
-    config_path = "main/Models_config.json"
+    config_path = Path("main/Models_config.json")
     if config_path.exists():
         download = input(f"Found {config_path}. Download models now? (y/n): ").lower().strip() == 'y'
         if download:
