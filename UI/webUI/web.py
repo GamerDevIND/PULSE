@@ -90,7 +90,7 @@ async def new_chat():
     
     c = await ai.context_manager.new_conversation()
     
-    gen = await ai.create_generation(query, cid=c.id)
+    gen = await ai.create_generation(query, cid=c.id, use_memory=False)
 
     if not gen:
         return "Generation creation failed", 500
@@ -131,7 +131,7 @@ async def send_message(cid):
             async for thinking, content in gen.stream():
                 out = json.dumps({"thinking": thinking, "content": content}) + "\n"
                 yield out
-
+                
         except asyncio.CancelledError:
 
             await ai.cancel_generation(gen.session_id)
