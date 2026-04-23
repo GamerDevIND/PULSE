@@ -99,7 +99,8 @@ async def new_chat():
         yield json.dumps({"chat_id": c.id, "content": "", "thinking": ""}) + "\n"
         
         async for thinking, content in gen.stream():
-            yield json.dumps({"thinking": thinking.strip(), "content": content.strip()}) + "\n"
+            out = json.dumps({"thinking": thinking, "content": content}) + "\n"
+            yield out
 
     return Response(stream_with_context(generate)(), mimetype='application/x-ndjson')
 
@@ -128,8 +129,9 @@ async def send_message(cid):
     async def generate():
         try:
             async for thinking, content in gen.stream():
+                out = json.dumps({"thinking": thinking, "content": content}) + "\n"
+                yield out
 
-                yield json.dumps({"thinking": thinking, "content": content}) + "\n"
         except asyncio.CancelledError:
 
             await ai.cancel_generation(gen.session_id)
