@@ -11,6 +11,7 @@ from .backends.openrouter_backend import OpenrouterBackend
 from .backends.single_server import SingleServer
 from .backends.backend import Generation
 import inspect
+from copy import deepcopy
 from .events import EventBus
 from .context_manager import ContextManager
 from .configs import ( 
@@ -133,7 +134,6 @@ class AI:
             self.status = {"status":"Warming up models", "message": "Warming up models for inference..."}
         
         
-
         await self.backend.init(self.tools_regis.list_tools())
 
         m = self.backend.models.get(summarising_model_role)
@@ -327,8 +327,9 @@ class AI:
             raise
 
         await self.event_bus.sequence_emit(self.event_bus.CREATING_SESSION)
+        async with self.lock:
+            cid = cid or self.last_cid
 
-        cid = cid or self.last_cid
         if not cid:
             await log(f"conversation for '{cid}' not found, creating a new conversation...", 'warn')
             c = await self.context_manager.new_conversation()
@@ -339,11 +340,13 @@ class AI:
         if not c:
             await log(f"conversation for '{cid}' not found, creating a new conversation...", 'warn')
             c = await self.context_manager.new_conversation()
-            self.last_cid = c.id
+            async with self.lock:
+                self.last_cid = c.id
 
         context = await c.get_context()
-        self.last_cid = c.id
+
         async with self.lock:
+            self.last_cid = c.id
             self.status = {"status":"Routing", "message": ""}
         
         await self.event_bus.sequence_emit(self.event_bus.ROUTING)
@@ -368,15 +371,15 @@ class AI:
         if stream is None:
             stream = self.platform not in STREAM_DISABLED
 
-        context = await self.context_manager.context_resolver(cid)
-
-        if file_path:
-            file_path = await self.context_manager.cache_manager.file_path_resolver(file_path)
-
-        summary = await  c.get_summary()
-        facts = await c.get_facts()
-
         async with self.lock:
+            context = await self.context_manager.context_resolver(cid)
+
+            if file_path:
+                file_path = await self.context_manager.cache_manager.file_path_resolver(file_path)
+
+            summary = await  c.get_summary()
+            facts = await c.get_facts()
+
             self.status = {"status": "Getting prompts", "message": "Prompting the query for better UX"}
             context, query = await self.get_prompted_query(context, summary, facts, use_memory, query)
             print(query)
