@@ -164,7 +164,7 @@ document.addEventListener('DOMContentLoaded', () => {
         msgDiv.classList.add(`${role}-message`);
         
         if (role === 'assistant') {
-            contentDiv.innerHTML = text.replace(/\n/g, '<br>') ? text : "Generating...";
+            contentDiv.innerHTML = text.replace(/\n/g, '<br>') ? text.replace(/\n/g, '<br>') : "Generating...";
         } else {
             if (!text) return;
             const cleanText = text.replace(/^.*?: /, "").replace(/\n/g, '<br>');
