@@ -107,54 +107,41 @@ document.addEventListener('DOMContentLoaded', () => {
             let currentThinking = "";
             let currentContent = "";
             let receivedChatId = false;
-            let buffer = "";
+
             while (true) {
                 const { value, done } = await reader.read();
-            
                 if (done) break;
-            
-                buffer += decoder.decode(value, { stream: true });
-            
-                const lines = buffer.split('\n');
-            
-                buffer = lines.pop(); // keep incomplete last line
-            
+                
+                const chunk = decoder.decode(value);
+                const lines = chunk.split('\n');
+                
                 for (const line of lines) {
-                    if (!line.trim()) continue;
-            
+                    if (!line) continue;
                     try {
                         const data = JSON.parse(line);
-            
+                        
                         if (data.chat_id && !receivedChatId) {
                             currentChatId = data.chat_id;
                             receivedChatId = true;
                             window.history.pushState({}, '', `/chat/${currentChatId}`);
                         }
-            
+
                         if (data.thinking) {
                             if (thinkingWrapper) thinkingWrapper.style.display = 'block';
                             currentThinking += data.thinking;
-            
                             if (thinkingArea) {
-                                thinkingArea.innerHTML =
-                                    currentThinking.replace(/^\n+/, "").replace(/\n/g, "<br>");
-                            }
+                                thinkingArea.innerHTML = currentThinking.replace(/^\n+/, "").replace(/\n/g, '<br>')
                         }
-            
+                        }
+
                         if (data.content) {
-                            if (contentArea.innerText === "Generating...") {
-                                contentArea.innerText = "";
-                            }
-            
+                            if (contentArea.innerText === "Generating...") contentArea.innerText = "";
                             currentContent += data.content;
-                            contentArea.innerHTML =
-                                currentContent.replace(/^\n+/, "").replace(/\n/g, "<br>");
                         }
-            
+                        contentArea.innerHTML = currentContent.replace(/^\n+/, "").replace(/\n/g, '<br>')
+                        
                         chatDisplay.scrollTop = chatDisplay.scrollHeight;
-                    } catch (e) {
-                        console.error("JSON parse error:", line, e);
-                    }
+                    } catch (e) { console.error("JSON parse error", e); }
                 }
             }
         } catch (error) {
@@ -177,7 +164,7 @@ document.addEventListener('DOMContentLoaded', () => {
         msgDiv.classList.add(`${role}-message`);
         
         if (role === 'assistant') {
-            contentDiv.innerHTML = text ? text.replace(/\n/g, '<br>') : "Generating...";
+            contentDiv.innerHTML = text.replace(/\n/g, '<br>') ? text : "Generating...";
         } else {
             if (!text) return;
             const cleanText = text.replace(/^.*?: /, "").replace(/\n/g, '<br>');
@@ -200,7 +187,7 @@ async function checkStatus() {
         const data = await res.json();
         const status = (typeof data === 'string' ? data : data.status).toLowerCase();
         
-        if (statusText) statusText.decoder = status.toUpperCase();
+        if (statusText) statusText.innerText = status.toUpperCase();
 
     } catch (e) {}
     setTimeout(checkStatus, 800);
