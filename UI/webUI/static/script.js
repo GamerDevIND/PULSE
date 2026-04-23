@@ -166,11 +166,11 @@ document.addEventListener('DOMContentLoaded', () => {
         msgDiv.classList.add(`${role}-message`);
         
         if (role === 'assistant') {
-            contentDiv.innerText = text.replace("\n", '<br>') ? text : "Generating...";
+            contentDiv.innerHTML = text.replace("\n", '<br>') ? text : "Generating...";
         } else {
             if (!text) return;
             const cleanText = text.replace(/^.*?: /, "").replace("\n", '<br>');
-            contentDiv.innerText = cleanText;
+            contentDiv.innerHTML = cleanText;
         }
 
         chatDisplay.appendChild(clone);
