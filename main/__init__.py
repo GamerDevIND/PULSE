@@ -12,7 +12,8 @@ from .models.model_instance import LocalModel
 from .models.openrouter_model import OpenRouterModel, OpenRouterEmbedder
 from .models.models_profile import RemoteModel
 from .tools import tool, Tool, ToolRegistry
-from.resource_manager import ResourceManager, SessionManager
+from .resource_manager import ResourceManager, SessionManager
+from .models.base_model import Model
 
-__all__ = ["AI", "Backend", "OpenrouterBackend", "OpenRouterModel", "OpenRouterEmbedder", "OllamaModel", "OllamaEmbedder", "log", 'tool', "ContextManager", "GenerationSession", "Summariser", "MultiServer", "SingleServer", 
+__all__ = ["AI", "Backend", "Model", "OpenrouterBackend", "OpenRouterModel", "OpenRouterEmbedder", "OllamaModel", "OllamaEmbedder", "log", 'tool', "ContextManager", "GenerationSession", "Summariser", "MultiServer", "SingleServer", 
            "LocalModel", "RemoteModel", "Tool", "ToolRegistry", "ResourceManager", "SessionManager"]

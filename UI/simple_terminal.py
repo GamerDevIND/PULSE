@@ -152,7 +152,7 @@ async def main():
                     print(f"{colorama.Fore.LIGHTBLACK_EX}{thinking}{colorama.Style.RESET_ALL}", end="", flush=True)
                 if response:
                     print(response, end="", flush=True)
-
+            print()
             print()
             words = await ai.context_manager.get_conversation(ai.last_cid)
             words = [c["content"] for c in await words.get_context()]

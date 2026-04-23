@@ -1,12 +1,10 @@
 import asyncio
 import base64
 import aiohttp
-from typing import Literal, Type
-from main.tools import Tool
 import json
-import inspect
 from io import BytesIO
 from main.resource_manager import SessionManager
+from .base_model import Model
 from main.utils import log
 from main.configs import IMAGE_EXTs, VIDEO_EXTs, ERROR_TOKEN
 import aiofiles
@@ -18,35 +16,21 @@ DOWN = "down"
 IDLE = "idle"
 BUSY = 'busy'
 
-class OpenRouterModel:
+class OpenRouterModel(Model):
     def __init__(self, role: str, name: str, model_name: str, has_tools: bool, has_CoT: bool, has_vision: bool, system_prompt: str, api_key: None | str = None, **kwargs) -> None:
-        self.role = role
-        self.name = name
-        self.model_name = model_name
+        self.host = f"https://openrouter.ai/api/v1/chat/completions"
+        super().__init__(role, self.host, name, model_name, api_key, DOWN)
         self.has_tools = has_tools
         self.has_CoT = has_CoT
         self.has_vision = has_vision
         self.port:int|None = None
-        self.host = f"https://openrouter.ai/api/v1/chat/completions"
         self.system = system_prompt
-        self.api_key = api_key
-        self.warmed_up = False
         self.has_video = False
-        self.state_lock = asyncio.Lock()
-        self.state = DOWN
-        self.tools = []
         self.resource_manager = SessionManager(self.model_name)
         self.input_handler = InputHandler()
 
     def update_port(self, port):
         pass
-
-    async def change_state(self, new, use_lock = True):
-        if use_lock:
-            async with self.state_lock: 
-                self.state = new
-        else:
-            self.state = new
 
     def set_has_video(self, has_video:bool):
         self.has_video = has_video
@@ -62,30 +46,26 @@ class OpenRouterModel:
     
     async def _encode_image(self, image_path):
         return await self.input_handler._encode_image(image_path)
+
+    async def get_model_details(self):
+        url = "https://openrouter.ai/api/v1/models"
+        headers = {
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {self.api_key}",
+        }
+
+        if not self.resource_manager.session:
+           self.resource_manager.create_session()
         
-    async def add_tools(self, *tool_dicts):
-        for tool in tool_dicts:
-            if isinstance(tool, Tool):
-                self.tools.append(tool.schema)
-            elif isinstance(tool, dict):
-                self.tools.append(tool)
-            elif callable(tool) and not inspect.isclass(tool):
-                needs_regeneration:bool = False
-                retry: Literal["none", "always", ] = "none"
-                max_retries: int = 0
-                retry_on: tuple[Type[Exception], ...] | None = None
-                visible_to_user: bool = True
-                metadata = {
-                    "needs_regeneration": needs_regeneration,
-                    "retry": retry,
-                    "max_retries": max_retries,
-                    "retry_on": retry_on or (),
-                    "visible_to_user": visible_to_user,
-                }
-                tool = Tool(tool, metadata)
-                self.tools.append(tool.schema)
-            else:
-                await log(f"No valid type dectected for: {tool}", 'warn')
+        if not self.resource_manager.session:
+           raise
+
+        async with self.resource_manager.session.get(url, headers=headers) as resp:
+            data = await resp.json()
+            res = next((m for m in data.get('data', []) if m['id'] == self.model_name), {})
+
+
+        return await self._get_model_details_helper(res)
 
     async def warm_up(
         self, use_mmap=False, warmup_image_path="main/test.jpg", use_custom_keep_alive_timeout=True, custom_keep_alive_timeout: str = "-1", 
@@ -355,25 +335,11 @@ class InputHandler:
         except Exception as e:
             return ERROR_TOKEN, repr(e)
 
-class OpenRouterEmbedder:
+class OpenRouterEmbedder(Model):
     def __init__(self, role, name: str, model_name: str, api_key:str, **kwargs) -> None:
-        self.role = role
-        self.name = name
-        self.model_name = model_name
         self.host =  f"https://openrouter.ai/api/v1/embeddings"
-        self.warmed_up = False
-        self.state_lock = asyncio.Lock()
-        self.state = DOWN
-        self.api_key = api_key
-        self.port:int|None = None
+        super().__init__(role, self.host, name, model_name, api_key, DOWN, **kwargs)
         self.resource_manager = SessionManager(self.model_name)
-    
-    async def __aenter__(self):
-        await self.warm_up()
-        return self
-
-    async def __aexit__(self, exc_type, exc_val, exc_tb):
-        await self.shutdown()
     
     def update_port(self, port):
         pass
@@ -397,12 +363,24 @@ class OpenRouterEmbedder:
         await self.resource_manager.shutdown(self.host, headers, payload)
         await self.change_state(DOWN)
 
-    async def change_state(self, new, use_lock = True):
-        if use_lock:
-            async with self.state_lock: 
-                self.state = new
-        else:
-            self.state = new
+    async def get_model_details(self):
+        url = "https://openrouter.ai/api/v1/models"
+        headers = {
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {self.api_key}",
+        }
+
+        if not self.resource_manager.session:
+           self.resource_manager.create_session()
+        
+        if not self.resource_manager.session:
+           raise
+
+        async with self.resource_manager.session.get(url, headers=headers) as resp:
+            data = await resp.json()
+            res = next((m for m in data.get('data', []) if m['id'] == self.model_name), {})
+
+        return await self._get_model_details_helper(res, "embedding", False)
 
     async def embed(self, input_:str | list[str] | tuple[str]):
         if isinstance(input_, tuple):

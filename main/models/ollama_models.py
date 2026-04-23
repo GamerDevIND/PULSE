@@ -3,21 +3,17 @@ import asyncio
 import aiohttp
 import aiofiles
 import av
-from main.resource_manager import SessionManager, ResourceManager
 import json
-from typing import Literal, Type
 from main.utils import log
-from main.tools import Tool
 from main.configs import IMAGE_EXTs, VIDEO_EXTs, ERROR_TOKEN
 import base64
 from io import BytesIO
+from .base_model import Model
 import sys
 if sys.platform != 'win32':
     from signal import SIGKILL
 else:
     SIGKILL = 9
-
-import inspect
 
 IDLE = "idle"
 BUSY = "busy"
@@ -25,43 +21,39 @@ SHUTTING_DOWN = "shutting_down"
 DOWN = "down"
 WARMING_UP = "warming_up"
 
-class OllamaModel:
+class OllamaModel(Model):
     def __init__(self, role: str, name: str, model_name: str, has_tools: bool, has_CoT: bool, has_vision: bool, port: int, system_prompt: str, api_key: None | str = None):
-        self.role = role
-        self.name = name
-        self.model_name = model_name
+        self.port = port
+        self.host =  f"http://localhost:{self.port}"
+        super().__init__(role, self.host, name, model_name, api_key, DOWN)       
         self.has_tools = has_tools
         self.has_CoT = has_CoT
         self.has_vision = has_vision
-        self.port = port
-        self.host =  f"http://localhost:{self.port}"
         self.system = system_prompt
-        self.api_key = api_key
-        self.warmed_up = False
         self.has_video = False
-        
-        self.tools = []
         self.generation_cancelled = False
-        self.state_lock = asyncio.Lock()
-        self.state = DOWN
-        self.resource_manager:ResourceManager | SessionManager
-
-    async def __aenter__(self):
-        await self.warm_up()
-        return self
-
-    async def __aexit__(self, exc_type, exc_val, exc_tb):
-        await self.shutdown()
 
     def _get_endpoint(self) -> str:
         return "/api/chat"
 
-    async def change_state(self, new, use_lock = True):
-        if use_lock:
-            async with self.state_lock: 
-                self.state = new
-        else:
-            self.state = new
+    async def get_model_details(self):
+        url = f"{self.host}/api/show"
+        data = {
+            "model": self.model_name
+        }
+        headers = {"Content-Type": "application/json"}
+        if self.api_key: headers['Authorization'] = f'Bearer {self.api_key}'
+
+        if not self.resource_manager.session:
+           self.resource_manager.create_session()
+        
+        if not self.resource_manager.session:
+           raise
+    
+        async with self.resource_manager.session.post(url, headers=headers, data= json.dumps(data)) as resp:
+            res = await resp.json()
+
+        return await self._get_model_details_helper(res)
 
     async def _encode_frames_from_vid(self, video_path, mod_ = 1, format_ = "JPEG"):
         if not self.has_vision:
@@ -106,50 +98,8 @@ class OllamaModel:
         except Exception as e:
             return ERROR_TOKEN, repr(e)
 
-    async def warm_up(
-        self,
-        use_mmap=False,
-        warmup_image_path="main/test.jpg",
-        use_custom_keep_alive_timeout=True,
-        custom_keep_alive_timeout: str = "-1",
-        has_video_processing=False,
-        warmup_video_path="main/test.mp4"): 
-        raise NotImplementedError
-
-    async def add_tools(self, *tool_dicts):
-        for tool in tool_dicts:
-            if isinstance(tool, Tool):
-                self.tools.append(tool.schema)
-            elif isinstance(tool, dict):
-                self.tools.append(tool)
-            elif callable(tool) and not inspect.isclass(tool):
-                needs_regeneration:bool = False
-                retry: Literal["none", "always", ] = "none"
-                max_retries: int = 0
-                retry_on: tuple[Type[Exception], ...] | None = None
-                visible_to_user: bool = True
-                metadata = {
-                    "needs_regeneration": needs_regeneration,
-                    "retry": retry,
-                    "max_retries": max_retries,
-                    "retry_on": retry_on or (),
-                    "visible_to_user": visible_to_user,
-                }
-                tool = Tool(tool, metadata)
-                self.tools.append(tool.schema)
-            else:
-                await log(f"No valid type dectected for: {tool}", 'warn')
-
     def cancel_global(self):
         self.generation_cancelled = True
-
-    async def generate(self, query: str, context: list[dict], stream: bool, think: str | bool | None = False, image_path: None | str = None, 
-                   mod_ = 1, system_prompt_override: str | None = None):
-
-        raise NotImplementedError
-
-    async def shutdown(self):
-        raise NotImplementedError
 
     async def _generator(self, query: str, context: list[dict], stream: bool, think: str | bool | None = False, file_path: None | str = None, 
                    mod_ = 10, video_save_buffer_format = "JPEG", system_prompt_override: str | None = None, options : dict | None = None, format_: dict | None = None, tools_override:None|list = None):
@@ -317,6 +267,7 @@ class OllamaModel:
             }
 
             headers = {"Content-Type": "application/json"}
+            if self.api_key: headers['Authorization'] = f'Bearer {self.api_key}'
             endpoint = self._get_endpoint()
             url = f"{self.host}{endpoint}"
             options = {}
@@ -324,7 +275,6 @@ class OllamaModel:
                 options["use_mmap"] = True
             if use_custom_keep_alive_timeout:
                 options["keep_alive"] = custom_keep_alive_timeout
-
             
             if self.has_vision:
                     if self.has_video and os.path.exists(warmup_video_path):
@@ -404,43 +354,15 @@ class OllamaModel:
 
 
 
-class OllamaEmbedder: 
+class OllamaEmbedder(Model): 
     def __init__(self, role, name: str, model_name: str, port:int, api_key = None) -> None:
-        self.role = role
-        self.name = name
-        self.model_name = model_name
         self.port = port
         self.host =  f"http://localhost:{self.port}"
-        self.warmed_up = False
+        super().__init__(role, self.host, name, model_name, api_key, DOWN)
         self.generation_cancelled = False
-        self.state_lock = asyncio.Lock()
-        self.state = DOWN
-        self.api_key = api_key
-
-        self.resource_manager:ResourceManager | SessionManager
-
-    async def __aenter__(self):
-        await self.warm_up()
-        return self
-
-    async def __aexit__(self, exc_type, exc_val, exc_tb):
-        await self.shutdown()
-
-    async def change_state(self, new, use_lock = True):
-        if use_lock:
-            async with self.state_lock: 
-                self.state = new
-        else:
-            self.state = new
                 
     def cancel_global(self):
         self.generation_cancelled = True
-
-    async def warm_up(self): 
-        raise NotImplementedError
-
-    async def shutdown(self):
-        raise NotImplementedError
 
     def _get_endpoint(self) -> str:
         return "/api/embed"
@@ -448,6 +370,26 @@ class OllamaEmbedder:
     def update_port(self, port):
         self.port = port
         self.host =  f"http://localhost:{self.port}"
+
+    async def get_model_details(self):
+        url = f"{self.host}/api/show"
+        data = {
+            "model": self.model_name
+        }
+        headers = {"Content-Type": "application/json"}
+        if self.api_key: headers['Authorization'] = f'Bearer {self.api_key}'
+
+        if not self.resource_manager.session:
+           self.resource_manager.create_session()
+        
+        if not self.resource_manager.session:
+           raise
+    
+        async with self.resource_manager.session.post(url, headers=headers, data= json.dumps(data)) as resp:
+            res = await resp.json()
+
+        return await self._get_model_details_helper(res, "embedding", False)
+
     
     async def embed(self, input_:str | list[str] | tuple[str]):
         if isinstance(input_, tuple):
@@ -525,6 +467,7 @@ class OllamaEmbedder:
             }
 
             headers = {"Content-Type": "application/json"}
+            if self.api_key: headers['Authorization'] = f'Bearer {self.api_key}'
             endpoint = self._get_endpoint()
             url = f"{self.host}{endpoint}"
 
