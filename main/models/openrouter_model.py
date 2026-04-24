@@ -115,7 +115,10 @@ class OpenRouterModel(Model):
         }
 
         if self.has_tools:
+            print('adding tools')
             data["tools"] = tools_override if tools_override else self.tools
+        print("tools dict:")
+        print(data['tools'])
 
         if format_:
             format_ = deepcopy(format_)
@@ -203,6 +206,8 @@ class OpenRouterModel(Model):
         if not self.resource_manager.session: raise
 
         buffer = ""
+
+        await log(json.dumps(data, indent=2,), "info")
 
         try:
             timeout = aiohttp.ClientTimeout(total=None)

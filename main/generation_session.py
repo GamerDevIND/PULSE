@@ -277,6 +277,10 @@ class GenerationSession:
             if not call_id and tool_idx:
                 result["index"] = tool_idx  
 
+            if result.get("role") != "tool":
+                await log(f"Invalid tool result role: {result}", "error")
+                continue
+
             results.append(result)  
             tools_objs.append(tool_obj)  
 

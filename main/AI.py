@@ -110,8 +110,7 @@ class AI:
             "retry_on": (Exception,),
             "timeout": 'inf'
         }
-        self.tools_regis.register(self.propose_memory, meta)
-
+        self.tools_regis.add_tool(self.propose_memory, meta)
 
         self.max_turns = max_turns
         self.abs_max_turns = absolute_max_turns
@@ -133,8 +132,9 @@ class AI:
         async with self.lock:
             self.status = {"status":"Warming up models", "message": "Warming up models for inference..."}
         
-        
-        await self.backend.init(self.tools_regis.list_tools())
+        tools = self.tools_regis.list_tools()
+        print(len(tools))
+        await self.backend.init(tools)
 
         m = self.backend.models.get(summarising_model_role)
 

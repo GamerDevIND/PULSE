@@ -198,7 +198,7 @@ class Conversation:
         self.queue = asyncio.Queue()
         self.id = uuid_ or str(uuid.uuid4())
         self.name = "New chat"
-        self.last_used = 0
+        self.last_used = -1
 
     async def load(self):
         try:
@@ -210,7 +210,7 @@ class Conversation:
                 self.messages = content.get("conversation",[])
                 self.id = content.get("id", self.id or str(uuid.uuid4()))
                 self.name = content.get("name", "New chat")
-                self.last_used = content.get('last_used', 0)
+                self.last_used = content.get('last_used', -1)
 
         except (FileNotFoundError, json.JSONDecodeError):
             await log("Context missing or corrupted. Starting over.", "warn")
@@ -219,7 +219,7 @@ class Conversation:
             self.facts = None
             self.id = self.id or str(uuid.uuid4())
             self.name = "New chat"
-            self.last_used = 0
+            self.last_used = -1
 
     async def save(self, path:str | None = None):
         try:
@@ -237,12 +237,18 @@ class Conversation:
     async def append(self, data:dict | list[dict] | tuple[dict], update:bool = False): 
         if not update:
             if type(data) == dict:
+                print("appending to context")
                 await self.queue.put(data)
                 async with self.lock: 
+                    print("updating last used")
                     self.last_used=  datetime.datetime.now().timestamp()
             elif type(data) in [list, tuple]:
-                for d in data: await self.queue.put(d)
+                for d in data: 
+                    print("appending to context")
+                    await self.queue.put(d)
+        
                 async with self.lock: 
+                    print("updating last used")
                     self.last_used=  datetime.datetime.now().timestamp()
             else: await log("unknown data type, skipping item.", "warn")
         else:

@@ -90,18 +90,29 @@ class ToolRegistry:
                 print(f"Tool {func.__name__} already registered!")
                 print(f"Tools listed: {ToolRegistry._tools.keys()}")
                 return
+            print(f"Registering: {func.__name__}")
             cls._tools[func.__name__] = Tool(func, meta)
 
     def __init__(self):
         with ToolRegistry._lock:
             self.tools = ToolRegistry._tools.copy()
-
+            print(f"{len(self.tools)}")
+            print(f"{len(ToolRegistry._tools)}")
 
     def clear(self):
         with ToolRegistry._lock: self.tools.clear()
 
     def clear_global(self):
         with ToolRegistry._lock: ToolRegistry._tools.clear()
+
+    def add_tool(self, func, meta):
+        with ToolRegistry._lock:
+            if func.__name__ in self.tools:
+                print(f"Tool {func.__name__} already registered!")
+                print(f"Tools listed: {ToolRegistry._tools.keys()}")
+                return
+            print(f"Registering: {func.__name__}")
+            self.tools[func.__name__] = Tool(func, meta)
 
     def list_tools(self):
         return list(self.tools.values())
