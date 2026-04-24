@@ -130,7 +130,7 @@ document.addEventListener('DOMContentLoaded', () => {
                             if (thinkingWrapper) thinkingWrapper.style.display = 'block';
                             currentThinking += data.thinking;
                             if (thinkingArea) {
-                                thinkingArea.innerHTML = currentThinking.replace(/^\n+/, "").replace(/\n/g, '<br>')
+                                thinkingArea.innerHTML = currentThinking.replace(/\n/g, '<br>')
                         }
                         }
 
@@ -138,7 +138,7 @@ document.addEventListener('DOMContentLoaded', () => {
                             if (contentArea.innerText === "Generating...") contentArea.innerText = "";
                             currentContent += data.content;
                         }
-                        contentArea.innerHTML = currentContent.replace(/^\n+/, "").replace(/\n/g, '<br>')
+                        contentArea.innerHTML = currentContent.replace(/\n/g, '<br>')
                         
                         chatDisplay.scrollTop = chatDisplay.scrollHeight;
                     } catch (e) { console.error("JSON parse error", e); }
@@ -167,7 +167,7 @@ document.addEventListener('DOMContentLoaded', () => {
             contentDiv.innerHTML = text.replace(/\n/g, '<br>') ? text.replace(/\n/g, '<br>') : "Generating...";
         } else {
             if (!text) return;
-            const cleanText = text.replace(/^.*?: /, "").replace(/\n/g, '<br>');
+            const cleanText = text.replace(/\n/g, '<br>');
             contentDiv.innerHTML = cleanText;
         }
 

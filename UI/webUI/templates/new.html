@@ -78,7 +78,7 @@
 
                             <div class="content-text">
 
-                                {{ msg.content | safe }}
+                                {{ msg.content | replace('\n', '<br>') | safe }}
 
                             </div>
 
