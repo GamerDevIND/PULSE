@@ -22,7 +22,7 @@ def tool(
             "timeout": timeout_secs
         }
         func.__meta__ = metadata
-        ToolRegistry.register(func, metadata)
+        ToolRegistry.register_global(func, metadata)
         return func
     return decor
 
@@ -84,7 +84,7 @@ class ToolRegistry:
     _lock = threading.RLock()
 
     @classmethod
-    def register(cls, func, meta):
+    def register_global(cls, func, meta):
         with cls._lock:
             if func.__name__ in cls._tools:
                 print(f"Tool {func.__name__} already registered!")
@@ -105,7 +105,7 @@ class ToolRegistry:
     def clear_global(self):
         with ToolRegistry._lock: ToolRegistry._tools.clear()
 
-    def add_tool(self, func, meta):
+    def add_tool_local(self, func, meta):
         with ToolRegistry._lock:
             if func.__name__ in self.tools:
                 print(f"Tool {func.__name__} already registered!")
