@@ -81,7 +81,7 @@ class Backend:
                 self._create_model_data(models_data, model, embedder, override_port, overwritten_port, auto_resolve_ports, require_key)
 
         except (FileNotFoundError, json.JSONDecodeError) as e:
-            print(f"🟥 Error loading models: {e}")
+            await log(f"🟥 Error loading models: {e}", "error")
             raise Exception("Models loading failed.", e)
 
     async def cancel_generation(self, session_id:str):
