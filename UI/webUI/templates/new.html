@@ -7,22 +7,28 @@
 
 </head>
 <body>
-
-    <div id="loading-screen">
-
-        <div class="loader-content">
-
-            <div class="spinner"></div>
-
-            <h2 id="status-text">Connecting...</h2>
-
-            <p id="status-details"></p>
-
-        </div>
-
-    </div>
-
     <div class="app-container">
+
+        <div class="settings-container">
+            <button id="settings-toggle" class="settings_icon">⚙</button>
+            
+            <div id="settings-panel" class="settings-panel">
+                <h2>System Settings</h2>
+                <div class="settings-item">
+                    <span>Username:</span>
+                    <strong>{{ name }}</strong>
+                </div>
+                <div class="settings-item">
+                    <span>Mode:</span>
+                    <strong class="mode-tag">{{ mode if mode else 'N/A' }}</strong>
+                </div>
+                <div class="settings-item">
+                    <span>Estimated Tokens:</span>
+                    <strong>{{ estimated_tokens if estimated_tokens else 0 }} tokens</strong>
+                </div><br>
+                <a href="" class="full-settings-link">View Advanced Config</a>
+            </div>
+        </div>
 
         <aside class="sidebar">
 
@@ -129,6 +135,8 @@
     </template>
 
     <script type="module" src="{{ url_for('static', filename='script.js') }}"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
 
 </body>
 </html>

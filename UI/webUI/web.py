@@ -46,7 +46,9 @@ async def startup():
 async def index():
     current_greeting = get_greeting()
     return await render_template("new.html", greeting = current_greeting, name = USERNAME, 
-                                 chats = await ai.context_manager.list_conversations())
+                                 chats = await ai.context_manager.list_conversations(),
+                                 estimated_tokens = 0,
+                                 mode = ai.mode,)
 
 @app.route('/chat/<cid>')
 async def chat_view(cid):
@@ -68,7 +70,8 @@ async def chat_view(cid):
                                      history=chat_data,
                                      summary = chat_summary,
                                      facts = chat_facts,
-                                     estimated_tokens = est)
+                                     estimated_tokens = est,
+                                     mode = ai.mode,)
     except KeyError:
         return "Chat not found", 404
     

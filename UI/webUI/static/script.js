@@ -179,3 +179,29 @@ document.addEventListener('DOMContentLoaded', () => {
     sendButton.addEventListener('click', sendMessage);
     if (newChatBtn) newChatBtn.addEventListener('click', () => window.location.href = '/');
 });
+
+const settingsToggle = document.getElementById('settings-toggle');
+const settingsPanel = document.getElementById('settings-panel');
+
+settingsToggle.addEventListener('click', () => {
+    const isOpen = settingsPanel.classList.toggle('active');
+    settingsToggle.classList.toggle('open');
+    
+    if (isOpen) {
+        settingsToggle.innerText = '✕';
+        settingsToggle.style.background = '#801c1c';
+    } else {
+        settingsToggle.innerText = '⚙';
+        settingsToggle.style.background = '#363636';
+    }
+});
+
+// Optional: Close panel if clicking outside
+document.addEventListener('click', (e) => {
+    if (!settingsPanel.contains(e.target) && !settingsToggle.contains(e.target)) {
+        settingsPanel.classList.remove('active');
+        settingsToggle.classList.remove('open');
+        settingsToggle.innerText = '⚙';
+        settingsToggle.style.background = '#363636';
+    }
+});

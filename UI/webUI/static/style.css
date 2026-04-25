@@ -593,3 +593,87 @@ textarea {
     word-break: break-all;
     overflow-wrap: break-word;
 }
+
+.settings-container {
+    position: static;
+    /* Let the children handle their own fixed positioning */
+}
+
+.settings_icon {
+    position: fixed;
+    /* Fix to viewport */
+    top: 20px;
+    right: 20px;
+    background: #363636;
+    /* Using your P.U.L.S.E. blue */
+    border: none;
+    border-radius: 50%;
+    color: azure;
+    width: 45px;
+    height: 45px;
+    font-size: 1.5rem;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: all 0.3s ease;
+    z-index: 2001;
+    /* Higher than the panel */
+}
+
+.settings-panel {
+    position: fixed;
+    /* Fix to viewport */
+    top: 0;
+    right: -320px;
+    /* Hidden off-screen */
+    width: 300px;
+    height: 100vh;
+    background: #171717;
+    border-left: 1px solid #333;
+    box-shadow: -10px 0 30px rgba(0, 0, 0, 0.5);
+    transition: right 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    padding: 80px 20px 20px;
+    /* Padding-top ensures text isn't behind the button */
+    display: flex;
+    flex-direction: column;
+    z-index: 2000;
+    /* Lower than the button icon */
+}
+
+.settings-panel.active {
+    right: 0;
+    /* Slide in */
+}
+
+/* Style for the items inside */
+.settings-item {
+    display: flex;
+    justify-content: space-between;
+    margin-bottom: 15px;
+    font-size: 0.9rem;
+    border-bottom: 1px solid #2a2a2a;
+    padding-bottom: 5px;
+}
+
+.settings-header h3 {
+    color: #00d4ff;
+    margin-bottom: 20px;
+}
+
+.user-profile p,
+.details p {
+    margin: 10px 0;
+    font-size: 0.9rem;
+    color: #e0e0e0;
+}
+
+.full-settings-link {
+    margin-top: auto;
+    color: #007bff;
+    text-decoration: none;
+    text-align: center;
+    padding: 10px;
+    border: 1px solid #007bff;
+    border-radius: 6px;
+}
