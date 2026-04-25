@@ -24,7 +24,8 @@ class GenerationSession:
     def __init__(self, query:str, context:list[dict], tools_regis:ToolRegistry, model: LocalModel | RemoteModel, system_prompt_override: str | None = None, 
                 options: dict | None = None, format_: dict | None = None, max_turns = 10, abs_max_turns = 50, regen_consent_callback= None, tools_override=None, event_bus: None | EventBus = None,) -> None:
         self.query = query
-        self.context = context
+        self.original_context = context
+        self.context:list[dict] = []
         self.tools_regis = tools_regis
         self.model = model
         self.state = CREATED
@@ -73,11 +74,13 @@ class GenerationSession:
         tools_called = []
         query = f"{user_save_prefix + " " if user_save_prefix else ""}{self.query}"
 
+        context = self.original_context + self.context
+
         if stream:
             queue = asyncio.Queue(maxsize=256)
             async def producer():
                 try:
-                    async for (thinking_chunk, content_chunk, tools_chunk) in self.model.generate(query, self.context, True,
+                    async for (thinking_chunk, content_chunk, tools_chunk) in self.model.generate(query, context, True,
                                                                                                         think=think, image_path=image_path, mod_ = mod_, 
                                                                                                         system_prompt_override=self.sys_override, options=self.options,
                                                                                                         format_=self.format,  tools_override=self.tools_override):
@@ -185,13 +188,16 @@ class GenerationSession:
             if self.event_bus:
                 await self.event_bus.sequence_emit(self.event_bus.GENERATION_CANCELLED, gen_id = self.id)
 
-    async def get_context(self):
+    async def get_context(self, include_original = False):
         async with self.context_lock:
-            return deepcopy(self.context)
+            return deepcopy((self.original_context + self.context) if include_original else self.context) 
     
-    async def set_context(self, context):
+    async def set_context(self, context, set_original = False):
         async with self.context_lock:
-            self.context = context
+            if set_original:
+                self.original_context = context
+            else:
+                self.context = context
 
     async def run_generation_loop(self, stream, user_save_prefix= None, think = False, file_path=None, mod_= 10):
         while True:
@@ -199,7 +205,6 @@ class GenerationSession:
                 yield thinking, response
             if not self.regen: break
 
-    
     async def _check_regen(self, tools:Iterable[Tool]):
         regen = any(t.needs_regeneration for t in tools)
         if regen:

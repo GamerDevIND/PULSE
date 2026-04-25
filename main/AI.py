@@ -392,7 +392,7 @@ class AI:
         sid, session = await self.backend.create_session(query, context, self.tools_regis, role, system, options, format_,
                                                          self.max_turns, self.abs_max_turns, self.regen_consent_callback)
        
-        gen = Generation(session, self.backend.remove_session, lambda x: self.context_manager.add_and_maintain(cid, x, True), 
+        gen = Generation(session, self.backend.remove_session, lambda x: self.context_manager.add_and_maintain(cid, x), 
                          stream,user_save_prefix, think, file_path, video_frames_mod, save_thinking, self.event_bus)
     
         async with self.lock:

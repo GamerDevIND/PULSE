@@ -246,14 +246,17 @@ class Conversation:
                     await self.queue.put(d)
         
                 async with self.lock: 
-                    self.last_used=  datetime.datetime.now().timestamp()
-            else: await log("unknown data type, skipping item.", "warn")
+                    self.last_used = datetime.datetime.now().timestamp()
+            else: 
+                await log("unknown data type, skipping item.", "warn")
         else:
             if not type(data) in [list, tuple]:
                 raise TypeError
+            
             async with self.lock:
                 self.queue = asyncio.Queue()
                 self.messages = list(data)
+                self.last_used = datetime.datetime.now().timestamp()
 
     async def flush_queue(self):
         if self.queue.empty():
