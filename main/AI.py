@@ -44,7 +44,7 @@ class AI:
             'summarizer': SUMMARIZER_PROMPT,
         }
         self.use_RAG = use_RAG
-        self.system_prompts = {k: v + f"\n\nThe **user's username** is: {USERNAME}" for k, v in self.system_prompts.items()}
+        if USERNAME.strip(): self.system_prompts = {k: v + f"\n\nThe **user's username** is: {USERNAME}" for k, v in self.system_prompts.items()}
         self.default_role = 'chat'
         self.running_tasks = set()
         self.max_memory_rag_chars = max_memory_rag_chars
@@ -77,7 +77,7 @@ class AI:
             self.RAG_Manager = None
 
     def load_models(self):
-        d = DEFAULT_PROMPT + f"\n\nThe user's username is: {USERNAME}"
+        d = DEFAULT_PROMPT + (f"\n\nThe user's username is: {USERNAME}") if USERNAME.strip() else ""
         if self.mode == 'multi':
             self.backend = MultiServer(self.model_config_path, self.system_prompts, d, self.event_bus)
             self.backend.load()
