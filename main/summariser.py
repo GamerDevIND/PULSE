@@ -131,5 +131,5 @@ class Summariser:
             # TODO: Trim the context to remove older entries if needed explicitly  
             await log("Summarised successfully", 'success')
             if self.event_bus:
-                await self.event_bus.sequence_emit(self.event_bus.SUMMARISED, summary = summary, facts = facts, context = context)
+                await self.event_bus.sequence_emit(self.event_bus.SUMMARISED,)
             return summary, facts, context
