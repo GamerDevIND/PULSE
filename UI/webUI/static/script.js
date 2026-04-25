@@ -179,17 +179,3 @@ document.addEventListener('DOMContentLoaded', () => {
     sendButton.addEventListener('click', sendMessage);
     if (newChatBtn) newChatBtn.addEventListener('click', () => window.location.href = '/');
 });
-
-async function checkStatus() {
-    const statusText = document.getElementById('status-text');
-    try {
-        const res = await fetch('/status');
-        const data = await res.json();
-        const status = (typeof data === 'string' ? data : data.status).toLowerCase();
-        
-        if (statusText) statusText.innerText = status.toUpperCase();
-
-    } catch (e) {}
-    setTimeout(checkStatus, 800);
-}
-window.addEventListener('load', checkStatus);

@@ -14,7 +14,6 @@ from main.configs import USERNAME
 
 app = Quart(__name__)
 ai = AI("main/openrouter_models_configs.json", mode='openrouter', use_RAG=False)
-last = ""
 
 def get_greeting():
     now = datetime.datetime.now()
@@ -42,16 +41,6 @@ async def shutdown_app():
 @app.before_serving
 async def startup():
     asyncio.create_task(ai.init("web"))
-
-@app.route('/status')
-async def get_status():
-    global last
-    async with ai.lock:
-        status = ai.status
-    if last != status['status']:
-        await log(f"System Status: {status}", 'info')
-        last = status['status']
-    return jsonify(status)
 
 @app.route('/')
 async def index():
