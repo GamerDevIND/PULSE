@@ -117,8 +117,6 @@ class OpenRouterModel(Model):
         if self.has_tools:
             print('adding tools')
             data["tools"] = tools_override if tools_override else self.tools
-        print("tools dict:")
-        print(data['tools'])
 
         if format_:
             format_ = deepcopy(format_)
