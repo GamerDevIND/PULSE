@@ -1,12 +1,13 @@
 import asyncio
 from main.resource_manager import SessionManager, ResourceManager
+from main.events import EventBus
 from main.tools import Tool
 import inspect
 from typing import Literal, Type
 from main.utils import log
 
 class Model:
-    def __init__(self, role, host, name: str, model_name: str, api_key:str | None, init_state, **kwargs) -> None:
+    def __init__(self, role, host, name: str, model_name: str, api_key:str | None, init_state, event_bus: None | EventBus = None, **kwargs) -> None:
         '''
         `resource_manager` attribute defaults to `SessionManager`
         '''
@@ -20,6 +21,7 @@ class Model:
         self.state = init_state
         self.api_key = api_key
         self.port:int | None = None
+        self.event_bus = event_bus
         self.details_cache = None
         self.resource_manager: ResourceManager | SessionManager = SessionManager(model_name)
 

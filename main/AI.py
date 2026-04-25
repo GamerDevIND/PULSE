@@ -103,14 +103,15 @@ class AI:
                    mem_save_confirm_callback = None, router_role = "router"): 
         
         await self.event_bus.parallel_emit(self.event_bus.INITIALISING)
-        meta = {
-            "needs_regeneration": False,
-            "retry": "none",
-            "max_retries": 1,
-            "retry_on": (Exception,),
-            "timeout": 'inf'
-        }
-        self.tools_regis.add_tool_local(self.propose_memory, meta)
+        if self.use_RAG:
+            meta = {
+                "needs_regeneration": False,
+                "retry": "none",
+                "max_retries": 1,
+                "retry_on": (Exception,),
+                "timeout": 'inf'
+            }
+            self.tools_regis.add_tool_local(self.propose_memory, meta)
 
         self.max_turns = max_turns
         self.abs_max_turns = absolute_max_turns
@@ -280,7 +281,9 @@ class AI:
                 await log("RAG manager not set for the instance!", 'error')
                 return context, query
             
-            self.status = {"status": "Retrieving memory...", "message": ""}
+            async with self.lock:
+                self.status = {"status": "Retrieving memory...", "message": ""}
+        
             await self.event_bus.parallel_emit(self.event_bus.RETRIEVING_MEMORY, query = query)
             rag_results = await self.RAG_Manager.retrieve(query, min_score=RAG_MIN_SCORE)
 
@@ -381,7 +384,6 @@ class AI:
 
             self.status = {"status": "Getting prompts", "message": "Prompting the query for better UX"}
             context, query = await self.get_prompted_query(context, summary, facts, use_memory, query)
-            print(query)
             self.status = {"status": "Generating session", 'message': ""}
                 
 

@@ -87,6 +87,7 @@ class LocalModel(OllamaModel):
             if self.state in (DOWN, SHUTTING_DOWN):
                 return
         await self.change_state(SHUTTING_DOWN)
+        if self.event_bus: await self.event_bus.parallel_emit(self.event_bus.INFO, msg = f"Shutting down model: {self.name} ({self.model_name})")
 
         url = f'{self.host}{self._get_endpoint()}'
         headers = {"Content-Type": "application/json"}
@@ -103,6 +104,7 @@ class LocalModel(OllamaModel):
 
         await self.change_state(DOWN)
         await log(f"{self.name} shutdown complete.", "success")
+        if self.event_bus: await self.event_bus.parallel_emit(self.event_bus.INFO, msg = f"Model shutdown: {self.name} ({self.model_name})")
 
 
 
@@ -141,6 +143,7 @@ class LocalEmbedder(OllamaEmbedder):
             if self.state in (DOWN, SHUTTING_DOWN):
                 return
         await self.change_state(SHUTTING_DOWN)
+        if self.event_bus: await self.event_bus.parallel_emit(self.event_bus.INFO, msg = f"Shutting down model: {self.name} ({self.model_name})")
 
         url = f'{self.host}{self._get_endpoint()}'
         headers = {"Content-Type": "application/json"}
@@ -157,3 +160,4 @@ class LocalEmbedder(OllamaEmbedder):
 
         await self.change_state(DOWN)
         await log(f"{self.name} shutdown complete.", "success")
+        if self.event_bus: await self.event_bus.parallel_emit(self.event_bus.INFO, msg = f"Model shutdown: {self.name} ({self.model_name})")

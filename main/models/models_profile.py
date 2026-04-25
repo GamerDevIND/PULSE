@@ -33,6 +33,7 @@ class RemoteModel(OllamaModel):
     async def shutdown(self):
         await log(f"Shutting down {self.name}...", "info")
         await self.change_state(SHUTTING_DOWN)
+        if self.event_bus: await self.event_bus.parallel_emit(self.event_bus.INFO, msg = f"Shutting down model: {self.name} ({self.model_name})")
         url = f'{self.host}{self._get_endpoint()}'
         headers = {"Content-Type": "application/json"}
 
@@ -48,6 +49,7 @@ class RemoteModel(OllamaModel):
             
         await log(F"{self.name} shutting down success", 'info')
         await self.change_state(DOWN)
+        if self.event_bus: await self.event_bus.parallel_emit(self.event_bus.INFO, msg = f"Model shutdown: {self.name} ({self.model_name})")
 
 
 class RemoteEmbedder(OllamaEmbedder):
@@ -63,6 +65,7 @@ class RemoteEmbedder(OllamaEmbedder):
     async def shutdown(self):
         await log(f"Shutting down {self.name}...", "info")
         await self.change_state(SHUTTING_DOWN)
+        if self.event_bus: await self.event_bus.parallel_emit(self.event_bus.INFO, msg = f"Shutting down model: {self.name} ({self.model_name})")
         url = f'{self.host}{self._get_endpoint()}'
         headers = {"Content-Type": "application/json"}
 
@@ -76,3 +79,4 @@ class RemoteEmbedder(OllamaEmbedder):
         await self.resource_manager.shutdown(url, headers, payload, True,)
         await log(F"{self.name} shutting down success", 'info')
         await self.change_state(DOWN)
+        if self.event_bus: await self.event_bus.parallel_emit(self.event_bus.INFO, msg = f"Model shutdown: {self.name} ({self.model_name})")

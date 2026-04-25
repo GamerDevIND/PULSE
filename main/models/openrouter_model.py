@@ -4,6 +4,7 @@ import aiohttp
 import json
 from io import BytesIO
 from main.resource_manager import SessionManager
+from main.events import EventBus
 from .base_model import Model
 from main.utils import log
 from main.configs import IMAGE_EXTs, VIDEO_EXTs, ERROR_TOKEN
@@ -17,9 +18,9 @@ IDLE = "idle"
 BUSY = 'busy'
 
 class OpenRouterModel(Model):
-    def __init__(self, role: str, name: str, model_name: str, has_tools: bool, has_CoT: bool, has_vision: bool, system_prompt: str, api_key: None | str = None, **kwargs) -> None:
+    def __init__(self, role: str, name: str, model_name: str, has_tools: bool, has_CoT: bool, has_vision: bool, system_prompt: str, api_key: None | str = None, event_bus: None | EventBus = None, **kwargs) -> None:
         self.host = f"https://openrouter.ai/api/v1/chat/completions"
-        super().__init__(role, self.host, name, model_name, api_key, DOWN)
+        super().__init__(role, self.host, name, model_name, api_key, DOWN, event_bus)
         self.has_tools = has_tools
         self.has_CoT = has_CoT
         self.has_vision = has_vision
@@ -69,13 +70,16 @@ class OpenRouterModel(Model):
 
     async def warm_up(
         self, use_mmap=False, warmup_image_path="main/test.jpg", use_custom_keep_alive_timeout=True, custom_keep_alive_timeout: str = "-1", 
-        has_video_processing=False, warmup_video_path="main/test.mp4"): 
+        has_video_processing=False, warmup_video_path="main/test.mp4"):
+        if self.event_bus: await self.event_bus.parallel_emit(self.event_bus.INFO, msg = f"Warming up: {self.name} ({self.model_name})")
         self.resource_manager.create_session()
         self.warmed_up = True
         await self.change_state(IDLE)
+        if self.event_bus: await self.event_bus.parallel_emit(self.event_bus.INFO, msg = f"{self.name} ({self.model_name}) warmed up!")
 
     async def shutdown(self):
         if self.state == DOWN: return
+        if self.event_bus: await self.event_bus.parallel_emit(self.event_bus.INFO, msg = f"Shutting down model: {self.name} ({self.model_name})")
         headers = {
             "Content-Type": "application/json",
             "Authorization": f"Bearer {self.api_key}",
@@ -87,6 +91,7 @@ class OpenRouterModel(Model):
         }
         await self.resource_manager.shutdown(self.host, headers, payload)
         await self.change_state(DOWN)
+        if self.event_bus: await self.event_bus.parallel_emit(self.event_bus.INFO, msg = f"Model shutdown: {self.name} ({self.model_name})")
 
     async def generate(self, query: str, context: list[dict], stream: bool, think: str | bool | None = False, image_path: None | str = None, 
                    mod_ = 1, video_save_buffer_format = "JPEG", system_prompt_override: str | None = None, options : dict | None = None, format_: dict | None = None, tools_override:None|list = None):
@@ -114,8 +119,7 @@ class OpenRouterModel(Model):
             "stream": stream,
         }
 
-        if self.has_tools:
-            print('adding tools')
+        if self.has_tools and (self.tools or tools_override):
             data["tools"] = tools_override if tools_override else self.tools
 
         if format_:
@@ -202,10 +206,9 @@ class OpenRouterModel(Model):
         if not self.resource_manager.session: self.resource_manager.create_session()
 
         if not self.resource_manager.session: raise
+        if self.event_bus: await self.event_bus.parallel_emit(self.event_bus.INFO, msg = "Generating response...")
 
         buffer = ""
-
-        await log(json.dumps(data, indent=2,), "info")
 
         try:
             timeout = aiohttp.ClientTimeout(total=None)
@@ -284,6 +287,7 @@ class OpenRouterModel(Model):
 
         except Exception as e:
             await log(f"Openrouter API Request Error: {e}", "error")
+            if self.event_bus: await self.event_bus.parallel_emit(self.event_bus.ERROR, msg = f"Openrouter API Request Error: {e}")
             yield (ERROR_TOKEN, ERROR_TOKEN, [])
 
 class InputHandler:
@@ -338,10 +342,12 @@ class InputHandler:
         except Exception as e:
             return ERROR_TOKEN, repr(e)
 
+
+
 class OpenRouterEmbedder(Model):
-    def __init__(self, role, name: str, model_name: str, api_key:str, **kwargs) -> None:
+    def __init__(self, role, name: str, model_name: str, api_key:str, event_bus: None | EventBus = None, **kwargs) -> None:
         self.host =  f"https://openrouter.ai/api/v1/embeddings"
-        super().__init__(role, self.host, name, model_name, api_key, DOWN, **kwargs)
+        super().__init__(role, self.host, name, model_name, api_key, DOWN, event_bus, **kwargs)
         self.resource_manager = SessionManager(self.model_name)
     
     def update_port(self, port):
@@ -349,12 +355,15 @@ class OpenRouterEmbedder(Model):
 
     async def warm_up(
         self): 
+        if self.event_bus: await self.event_bus.parallel_emit(self.event_bus.INFO, msg = f"Warming up: {self.name} ({self.model_name})")
         self.resource_manager.create_session()
         self.warmed_up = True
         await self.change_state(IDLE)
+        if self.event_bus: await self.event_bus.parallel_emit(self.event_bus.INFO, msg = f"{self.name} ({self.model_name}) warmed up!")
 
     async def shutdown(self):
         if self.state == DOWN: return
+        if self.event_bus: await self.event_bus.parallel_emit(self.event_bus.INFO, msg = f"Shutting down model: {self.name} ({self.model_name})")
         headers = {
             "Content-Type": "application/json",
             "Authorization": f"Bearer {self.api_key}",
@@ -365,6 +374,7 @@ class OpenRouterEmbedder(Model):
         }
         await self.resource_manager.shutdown(self.host, headers, payload)
         await self.change_state(DOWN)
+        if self.event_bus: await self.event_bus.parallel_emit(self.event_bus.INFO, msg = f"Model shutdown: {self.name} ({self.model_name})")
 
     async def get_model_details(self):
         url = "https://openrouter.ai/api/v1/models"
@@ -409,6 +419,8 @@ class OpenRouterEmbedder(Model):
         if not self.resource_manager.session: self.resource_manager.create_session()
         if not self.resource_manager.session: raise   
 
+        if self.event_bus: await self.event_bus.parallel_emit(self.event_bus.INFO, msg = "Embedding input(s)")
+
         try:
             timeout = aiohttp.ClientTimeout(total=120)
             async with self.resource_manager.session.post(self.host, headers=headers, data=json.dumps(data), timeout=timeout) as response:
@@ -429,7 +441,8 @@ class OpenRouterEmbedder(Model):
             return
 
         except Exception as e:
-            await log(f"Ollama API Request Error: {e}", "error")
+            await log(f"Openrouter API Request Error: {e}", "error")
+            if self.event_bus: await self.event_bus.parallel_emit(self.event_bus.ERROR, msg = f"Openrouter API Request Error: {e}")
             return (ERROR_TOKEN)
         
         finally:

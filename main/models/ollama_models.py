@@ -6,6 +6,7 @@ import av
 import json
 from main.utils import log
 from main.configs import IMAGE_EXTs, VIDEO_EXTs, ERROR_TOKEN
+from main.events import EventBus
 import base64
 from io import BytesIO
 from .base_model import Model
@@ -22,10 +23,11 @@ DOWN = "down"
 WARMING_UP = "warming_up"
 
 class OllamaModel(Model):
-    def __init__(self, role: str, name: str, model_name: str, has_tools: bool, has_CoT: bool, has_vision: bool, port: int, system_prompt: str, api_key: None | str = None):
+    def __init__(self, role: str, name: str, model_name: str, has_tools: bool, has_CoT: bool, has_vision: bool, port: int, system_prompt: str, 
+                 api_key: None | str = None, event_bus: None | EventBus = None):
         self.port = port
         self.host =  f"http://localhost:{self.port}"
-        super().__init__(role, self.host, name, model_name, api_key, DOWN)       
+        super().__init__(role, self.host, name, model_name, api_key, DOWN, event_bus)       
         self.has_tools = has_tools
         self.has_CoT = has_CoT
         self.has_vision = has_vision
@@ -126,7 +128,7 @@ class OllamaModel(Model):
             "stream": stream
         }
 
-        if self.has_tools:
+        if self.has_tools and (self.tools or tools_override):
             data["tools"] = tools_override if tools_override else self.tools
 
         if options:
@@ -164,6 +166,8 @@ class OllamaModel(Model):
         buffer = ""
 
         if not self.resource_manager.session: raise
+
+        if self.event_bus: await self.event_bus.parallel_emit(self.event_bus.INFO, msg = "Generating response...")
 
         try:
             timeout = aiohttp.ClientTimeout(total=None)
@@ -231,6 +235,7 @@ class OllamaModel(Model):
 
         except Exception as e:
             await log(f"Ollama API Request Error: {e}", "error")
+            if self.event_bus: await self.event_bus.parallel_emit(self.event_bus.ERROR, msg = f"Ollama API Request Error: {e}")
             yield (ERROR_TOKEN, ERROR_TOKEN, [])
 
         self.generation_cancelled = False
@@ -255,6 +260,7 @@ class OllamaModel(Model):
                 raise RuntimeError(f"{self.name} cannot warm up from state={self.state}")
 
         await self.change_state(WARMING_UP)
+        if self.event_bus: await self.event_bus.parallel_emit(self.event_bus.INFO, msg = f"Warming up: {self.name} ({self.model_name})")
 
         try:
 
@@ -341,6 +347,7 @@ class OllamaModel(Model):
                     
             self.warmed_up = True
             await log(f"{self.name} ({self.model_name}) warmed up!", "success")
+            if self.event_bus: await self.event_bus.parallel_emit(self.event_bus.INFO, msg = f"{self.name} ({self.model_name}) warmed up!")
 
         except Exception:
             self.warmed_up = False
@@ -355,10 +362,10 @@ class OllamaModel(Model):
 
 
 class OllamaEmbedder(Model): 
-    def __init__(self, role, name: str, model_name: str, port:int, api_key = None) -> None:
+    def __init__(self, role, name: str, model_name: str, port:int, api_key = None, event_bus: None | EventBus = None) -> None:
         self.port = port
         self.host =  f"http://localhost:{self.port}"
-        super().__init__(role, self.host, name, model_name, api_key, DOWN)
+        super().__init__(role, self.host, name, model_name, api_key, DOWN, event_bus)
         self.generation_cancelled = False
                 
     def cancel_global(self):
@@ -412,6 +419,8 @@ class OllamaEmbedder(Model):
 
         if not self.resource_manager.session: raise
 
+        if self.event_bus: await self.event_bus.parallel_emit(self.event_bus.INFO, msg = "Embedding input(s)")
+
         try:
             timeout = aiohttp.ClientTimeout(total=120)
             async with self.resource_manager.session.post(url, headers=headers, data=json.dumps(data), timeout=timeout) as response:
@@ -439,6 +448,7 @@ class OllamaEmbedder(Model):
 
         except Exception as e:
             await log(f"Ollama API Request Error: {e}", "error")
+            if self.event_bus: await self.event_bus.parallel_emit(self.event_bus.ERROR, msg = f"Ollama API Request Error: {e}")
             return (ERROR_TOKEN)
         
         finally:
@@ -452,6 +462,7 @@ class OllamaEmbedder(Model):
                 raise RuntimeError(f"{self.name} cannot warm up from state={self.state}")
 
         await self.change_state(WARMING_UP)
+        if self.event_bus: await self.event_bus.parallel_emit(self.event_bus.INFO, msg = f"Warming up: {self.name} ({self.model_name})")
 
         try:
             self.resource_manager.create_session()
@@ -488,12 +499,13 @@ class OllamaEmbedder(Model):
                     res_json = await response.json()
                     embeds = res_json.get('embeddings', [])
                     await log(f'Raw output: {embeds}', 'info')
+                    if self.event_bus: await self.event_bus.parallel_emit(self.event_bus.INFO, msg = f"Warming up done for: {self.name}({self.model_name})")
                     self.warmed_up = True
                 except Exception as e:
                     await log(f"Failed to load embedding model's response while warming up: {repr(e)}", 'error')
                     raise Exception(f"Failed to load embedding model's response while warming up: {repr(e)}")
         except Exception:
             self.warmed_up = False
-            raise
-        finally: 
+            raise RuntimeError
+        finally:
             await self.change_state(IDLE if self.warmed_up else DOWN)

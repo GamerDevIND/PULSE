@@ -22,9 +22,11 @@ class Backend:
         self.sessions:dict[str, GenerationSession] = {}
         self.running_tasks = set()
         self.event_bus = event_bus
-        
+        self.lock = asyncio.Lock()
 
     def _create_model_data(self, models_data, model, embedder, override_port = False, overwritten_port=11343, auto_resolve_ports = True, require_key = False):
+        if self.event_bus:asyncio.create_task(self.event_bus.parallel_emit(self.event_bus.MODELS_LOADING))
+
         for model_data in models_data:
                     role = model_data.get('role')
                     if override_port:
@@ -48,13 +50,17 @@ class Backend:
                             if not (system and system.strip()):
                                 model_data["system_prompt"] = self.system_prompts.get(role, self.default_system_prompt)
                             
-                            self.models[role] = model(**model_data)
+                            self.models[role] = model(**model_data, event_bus = self.event_bus)
                         else:
-                            self.models[role] = embedder(EMBEDDING_MODEL_ROLE, model_data.get("name", 'Embedder'), model_data['model_name'], model_data.get('port'), key)
+                            self.models[role] = embedder(EMBEDDING_MODEL_ROLE, model_data.get("name", 'Embedder'), model_data['model_name'], 
+                                                         model_data.get('port'), key, event_bus = self.event_bus)
                         if override_port:
                             self.models[role].update_port(overwritten_port)
                     else:
-                        raise KeyError
+                        if self.event_bus:asyncio.create_task(self.event_bus.parallel_emit(self.event_bus.ERROR, True, msg= "No role provided"))
+                        raise KeyError("No role provided")    
+
+        if self.event_bus: asyncio.create_task(self.event_bus.parallel_emit(self.event_bus.MODELS_LOADED))          
 
     def _load(self, model, embedder, override_port = False, overwritten_port=11343, auto_resolve_ports = True, require_key = False):
         try:
@@ -101,6 +107,8 @@ class Backend:
                     await model.warm_up()
                 else:
                     await log(f"{model.name} ({model.model_name}) is already warmed, skipping... This maybe abnormal, please ensure the initilising logic.", 'warn')
+
+
         t = asyncio.create_task(self._check_sessions())
         self.running_tasks.add(t)
         t.add_done_callback(self.running_tasks.discard)
@@ -117,9 +125,10 @@ class Backend:
             for s_id in to_remove:
                 session = self.sessions.get(s_id)
                 if session:
-                    await session.cancel()
-                    del self.sessions[s_id]
-                    await log(f"Session {s_id} cleaned up.", "info", stdout=False)
+                    async with self.lock:
+                        await session.cancel()
+                        del self.sessions[s_id]
+                        await log(f"Session {s_id} cleaned up.", "info", stdout=False)
 
             await asyncio.sleep(5.5)
 

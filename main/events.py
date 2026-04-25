@@ -28,6 +28,13 @@ class EventBus:
     SHUTTING_DOWN = 'shutting down'
     SHUTDOWN = 'shut down'
 
+    MODELS_LOADING = "loading models"
+    MODELS_LOADED = "loaded models"
+    INFO = "info"
+    WARN = "warn"
+    WARNING = "warn"
+    ERROR = "error"
+
     def  __init__(self) -> None:
         self.listeners:dict[str, set] = {}
         self._lock = threading.RLock()

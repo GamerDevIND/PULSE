@@ -54,7 +54,7 @@ class Router:
                 raise Exception("No role provided for router")
 
             try:
-                async for _, part, _ in self.model.generate(query=query, context=context, stream=False, format_ = self.format):
+                async for _, part, _ in self.model.generate(query=query, context=context, stream=False, format_ = self.format, tools_override=[]):
                     if part == ERROR_TOKEN:
                         await log("Router API call failed. Falling back to default role.", "error")
                         return query, self.fallback_role
