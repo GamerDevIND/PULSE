@@ -237,18 +237,15 @@ class Conversation:
     async def append(self, data:dict | list[dict] | tuple[dict], update:bool = False): 
         if not update:
             if type(data) == dict:
-                print("appending to context")
+        
                 await self.queue.put(data)
                 async with self.lock: 
-                    print("updating last used")
                     self.last_used=  datetime.datetime.now().timestamp()
             elif type(data) in [list, tuple]:
                 for d in data: 
-                    print("appending to context")
                     await self.queue.put(d)
         
                 async with self.lock: 
-                    print("updating last used")
                     self.last_used=  datetime.datetime.now().timestamp()
             else: await log("unknown data type, skipping item.", "warn")
         else:
