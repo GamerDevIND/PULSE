@@ -96,8 +96,6 @@ class ToolRegistry:
     def __init__(self):
         with ToolRegistry._lock:
             self.tools = ToolRegistry._tools.copy()
-            print(f"{len(self.tools)}")
-            print(f"{len(ToolRegistry._tools)}")
 
     def clear(self):
         with ToolRegistry._lock: self.tools.clear()
