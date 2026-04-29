@@ -15,22 +15,38 @@ class SessionManager:
         if not self.session or self.session.closed:
             self.session = aiohttp.ClientSession()
     
-    async def shutdown(self, url= None, headers:dict | None = None, payload=None, set_session_to_None=False):
+    async def shutdown(self, send_shutdown_paylod = True, url= None, headers:dict | None = None, payload=None, set_session_to_None=False):
         if self.session is not None:
-                if url is None:
-                    await log("url cannot be none during session cleanup, aborting...", 'warn')
-                    return
-                try:
-                    async with self.session.post(url, json=payload, headers=headers, timeout=aiohttp.ClientTimeout(total=15)) as resp:
-                        resp.raise_for_status()
-                except Exception as e:
-                    await log(f"An error occurred during session cleanup: {e}", "error") 
-
-                await asyncio.sleep(1.5) 
+            if not send_shutdown_paylod:
                 try:
                     await self.session.close()
                 except Exception as e:
                     await log(f"An error occurred during session cleanup: {e}", "error")
+                
+                if set_session_to_None and (self.session and (not self.session.closed)):
+                    try:
+                        await self.session.close()
+                        await asyncio.sleep(0.5)
+                    except Exception as e:
+                        await log(f"An error occurred during session closing: {e}", "error") 
+                    self.session = None
+                
+                return
+
+            if url is None:
+                await log("url cannot be none during session cleanup, aborting...", 'warn')
+                return
+            try:
+                async with self.session.post(url, json=payload, headers=headers, timeout=aiohttp.ClientTimeout(total=15)) as resp:
+                    resp.raise_for_status()
+            except Exception as e:
+                await log(f"An error occurred during session cleanup: {e}", "error") 
+
+            await asyncio.sleep(1.5) 
+            try:
+                await self.session.close()
+            except Exception as e:
+                await log(f"An error occurred during session cleanup: {e}", "error")
 
         if set_session_to_None and (self.session and (not self.session.closed)):
             try:
@@ -106,13 +122,13 @@ class ResourceManager(SessionManager):
                     print(f"An error occurred during process creation: {e}")
                 self._log_file = None 
 
-    async def shutdown(self, url = None, headers:dict|None = None, payload=None, session_cleanup= True, process_cleanup=False, set_session_to_None = True):
+    async def shutdown(self, send_shutdown_paylod = True, url = None, headers:dict|None = None, payload=None, session_cleanup= True, process_cleanup=False, set_session_to_None = True):
         if session_cleanup:
-            if url is None or payload is None:
+            if send_shutdown_paylod and (url is None or payload is None):
                 await log("url or paylaod cannot be none during session cleanup, aborting...", 'warn')
                 return
             
-            await super().shutdown(url, headers, payload, set_session_to_None)
+            await super().shutdown(send_shutdown_paylod, url, headers, payload, set_session_to_None)
 
         if process_cleanup:
             if self.process is not None:
