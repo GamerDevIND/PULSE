@@ -148,12 +148,13 @@ class AI:
         if m and  not isinstance(m, (RemoteModel, LocalModel, OpenRouterModel)):
             raise TypeError
 
-        self.router = Router(m, self.default_role, "chat", "cot", auto_warmup=True)
+        self.router = Router(m, self.default_role, "chat", "cot", 'vision', auto_warmup=True)
 
         m = self.backend.models.get(EMBEDDING_MODEL_ROLE)
 
         if m and not isinstance(m, (RemoteEmbedder, LocalEmbedder, OpenRouterEmbedder)):
             raise TypeError
+        
         if self.RAG_Manager:
             self.RAG_Manager.embedder = m
 
@@ -212,7 +213,7 @@ class AI:
         if inspect.isawaitable(confirmed):
             confirmed = await confirmed
 
-        if type(confirmed) == str: confirmed = confirmed.lower().strip()
+        if isinstance(confirmed, str): confirmed = confirmed.lower().strip()
 
         if not confirmed in true_calls:
             return "User refused to save to memory. Do not insist."

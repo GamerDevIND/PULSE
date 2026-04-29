@@ -5,6 +5,7 @@ import inspect
 from typing import Any, get_origin, get_args, Union, List, Dict, Literal
 from weakref import WeakKeyDictionary
 from copy import deepcopy
+import re
 
 async def log(message: str, level, append = True, stdout = True):
     log_dir = os.path.join( "main", "logs")
@@ -26,7 +27,15 @@ async def log(message: str, level, append = True, stdout = True):
         await f.write(text)
 
 def estimate_tokens(text:str):
-    return len(text.split()) * 1.3
+    return len(text) / 3.5
+
+THINK_RE = re.compile(r'<think>(.*?)</think>', re.DOTALL | re.IGNORECASE)
+
+def strip_thinking(content: str) -> tuple[str, str]:
+    if '<think>' not in content.lower():
+        return content, ''
+    parts = THINK_RE.findall(content)
+    return THINK_RE.sub('', content).strip(), '\n'.join(parts)
 
 def schemaify(python_type: Any) -> dict: # Before you ask: yes, this is AI generated
     origin = get_origin(python_type)

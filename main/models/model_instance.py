@@ -100,7 +100,7 @@ class LocalModel(OllamaModel):
             'options': {'keep_alive': 0}
         }
 
-        await self.resource_manager.shutdown(url, headers, payload, True, True)
+        await self.resource_manager.shutdown(True, url, headers, payload, True, True)
 
         await self.change_state(DOWN)
         await log(f"{self.name} shutdown complete.", "success")
@@ -156,7 +156,7 @@ class LocalEmbedder(OllamaEmbedder):
             'options': {'keep_alive': 0}
         }
 
-        await self.resource_manager.shutdown(url, headers, payload, True, True, set_session_to_None = True) 
+        await self.resource_manager.shutdown(True, url, headers, payload, True, True, set_session_to_None = True) 
 
         await self.change_state(DOWN)
         await log(f"{self.name} shutdown complete.", "success")

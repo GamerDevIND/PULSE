@@ -4,7 +4,7 @@ import aiohttp
 import aiofiles
 import av
 import json
-from main.utils import log
+from main.utils import log, strip_thinking
 from main.configs import IMAGE_EXTs, VIDEO_EXTs, ERROR_TOKEN
 from main.events import EventBus
 import base64
@@ -220,6 +220,13 @@ class OllamaModel(Model):
                         thinking = res_json.get("message", {}).get("thinking", "")
                         content = res_json.get("message", {}).get("content", "")
                         tools = res_json.get("message", {}).get("tool_calls", [])
+                        if not thinking.strip():
+                            c, t = strip_thinking(content)
+                            if c:
+                                content = c
+                            if t:
+                                thinking = t
+
                         yield (thinking, content, tools)
                     except asyncio.CancelledError:
                         await log(f"Non-stream generation cancelled for {self.name}", "info")

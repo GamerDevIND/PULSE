@@ -6,7 +6,7 @@ from io import BytesIO
 from main.resource_manager import SessionManager
 from main.events import EventBus
 from .base_model import Model
-from main.utils import log
+from main.utils import log, strip_thinking
 from main.configs import IMAGE_EXTs, VIDEO_EXTs, ERROR_TOKEN
 import aiofiles
 import av
@@ -80,16 +80,7 @@ class OpenRouterModel(Model):
     async def shutdown(self):
         if self.state == DOWN: return
         if self.event_bus: await self.event_bus.parallel_emit(self.event_bus.INFO, msg = f"Shutting down model: {self.name} ({self.model_name})")
-        headers = {
-            "Content-Type": "application/json",
-            "Authorization": f"Bearer {self.api_key}",
-        }
-        payload = {
-            'model': self.model_name,
-            'messages': [{'role': 'user', 'content': 'bye'}],
-            "stream": True
-        }
-        await self.resource_manager.shutdown(self.host, headers, payload)
+        await self.resource_manager.shutdown(send_shutdown_paylod=False)
         await self.change_state(DOWN)
         if self.event_bus: await self.event_bus.parallel_emit(self.event_bus.INFO, msg = f"Model shutdown: {self.name} ({self.model_name})")
 
@@ -206,6 +197,7 @@ class OpenRouterModel(Model):
         if not self.resource_manager.session: self.resource_manager.create_session()
 
         if not self.resource_manager.session: raise
+        await self.change_state(BUSY)
         if self.event_bus: await self.event_bus.parallel_emit(self.event_bus.INFO, msg = "Generating response...")
 
         buffer = ""
@@ -246,6 +238,7 @@ class OpenRouterModel(Model):
                                     if "error" in json_line:
                                         await log(f"Error during generation of {self.name}: {json_line['error']['message']}", 'error')
                                         yield (ERROR_TOKEN, ERROR_TOKEN, [])
+                                        await self.change_state(IDLE)
                                         return
 
                                     choices = list(json_line['choices'])
@@ -253,6 +246,9 @@ class OpenRouterModel(Model):
                                     thinking = message.get('reasoning', message.get('thinking', message.get("reasoning_content" ,"")))
                                     content = message.get('content', "")
                                     tools = message.get("tool_calls", message.get('tools',[]))
+                                    if not isinstance(tools, (list, tuple)):
+                                        tools = [tools]
+
                                     yield (thinking, content, tools)
                                 except json.JSONDecodeError:
                                     continue
@@ -264,6 +260,7 @@ class OpenRouterModel(Model):
                         await log(f"Generation cancelled for {self.name}", "info")
                         await response.release()
                         response.close()
+                        await self.change_state(IDLE)
                         return 
 
                 else:
@@ -273,12 +270,24 @@ class OpenRouterModel(Model):
                         message = choices[0]['message']
                         thinking = message.get('reasoning', message.get('thinking', ""))
                         content = message.get('content', "")
-                        tools = message.get("tool_calls", message.get('tools', []))
+                        tools = message.get("tool_calls", message.get('tools',[]))
+
+                        if not thinking.strip():
+                            c, t = strip_thinking(content)
+                            if c:
+                                content = c
+                            if t:
+                                thinking = t
+                        
+                        if not isinstance(tools, (list, tuple)):
+                            tools = [tools]
+                                        
                         yield (thinking, content, tools)
                     except asyncio.CancelledError:
                         await log(f"Non-stream generation cancelled for {self.name}", "info")
                         await response.release()
                         response.close()
+                        await self.change_state(IDLE)
                         return 
 
         except asyncio.CancelledError:
@@ -289,6 +298,9 @@ class OpenRouterModel(Model):
             await log(f"Openrouter API Request Error: {e}", "error")
             if self.event_bus: await self.event_bus.parallel_emit(self.event_bus.ERROR, msg = f"Openrouter API Request Error: {e}")
             yield (ERROR_TOKEN, ERROR_TOKEN, [])
+            
+        finally:
+            await self.change_state(IDLE)
 
 class InputHandler:
     def __init__(self) -> None:
@@ -364,15 +376,8 @@ class OpenRouterEmbedder(Model):
     async def shutdown(self):
         if self.state == DOWN: return
         if self.event_bus: await self.event_bus.parallel_emit(self.event_bus.INFO, msg = f"Shutting down model: {self.name} ({self.model_name})")
-        headers = {
-            "Content-Type": "application/json",
-            "Authorization": f"Bearer {self.api_key}",
-        }
-        payload = {
-            'model': self.model_name,
-            "input": "bye",
-        }
-        await self.resource_manager.shutdown(self.host, headers, payload)
+
+        await self.resource_manager.shutdown(send_shutdown_paylod=False)
         await self.change_state(DOWN)
         if self.event_bus: await self.event_bus.parallel_emit(self.event_bus.INFO, msg = f"Model shutdown: {self.name} ({self.model_name})")
 

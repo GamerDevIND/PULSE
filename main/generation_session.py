@@ -3,13 +3,13 @@ from .models.models_profile import RemoteModel
 import asyncio
 from .tools import ToolRegistry, Tool
 from typing import Iterable
-from .utils import log
+from .utils import log, strip_thinking
 import json
 from copy import deepcopy
 import uuid
 import datetime
 import inspect
-from .configs import ERROR_TOKEN, FILE_NAME_KEY
+from .configs import ERROR_TOKEN, FILE_NAME_KEY, INSTANT_TOOL_EXEC
 from .events import EventBus
 
 CREATED = "CREATED"
@@ -58,13 +58,13 @@ class GenerationSession:
 
     async def generate(self,  stream: bool, user_save_prefix= None, think: str | bool | None = False, image_path: None | str = None,  mod_ = 10, save_thinking= True):
         if image_path and self.model.role != "vision": 
-            await log("Image / Video path provided but no vision model chosen. Role changing to Vision.", 'warn')
+            await log("Image / Video path provided but no vision model chosen. Aborting...", 'warn')
 
             if self.state in [GENERATING, TOOLING]:
                 await self.cancel()
                 await self.change_state(FAIL)
 
-            yield (ERROR_TOKEN, ERROR_TOKEN)
+            yield (ERROR_TOKEN, ERROR_TOKEN, [])
             return
         
         await self.change_state(GENERATING)
@@ -74,7 +74,8 @@ class GenerationSession:
         tools_called = []
         query = f"{user_save_prefix + " " if user_save_prefix else ""}{self.query}"
 
-        context = self.original_context + self.context
+        async with self.context_lock:
+            context = self.original_context + self.context
 
         if stream:
             queue = asyncio.Queue(maxsize=256)
@@ -108,17 +109,27 @@ class GenerationSession:
                 thinking_chunk, content_chunk, tools_chunk = item
 
                 if tools_chunk:
-                    tools_called.extend(tools_chunk)
+                    if INSTANT_TOOL_EXEC:
+                        await self.execute_tools(tools_chunk)
+                    else:
+                        tools_called.extend(tools_chunk)
 
                 thinking_final += thinking_chunk or ""
                 content_final += content_chunk or ""
 
-                yield (thinking_chunk or "", content_chunk or "")
+                tool_names = [t.get('function', {}).get('name', "") for t in tools_chunk] if tools_chunk else []
+
+                yield (thinking_chunk or "", content_chunk or "", tool_names)
                 if self.event_bus: await self.event_bus.parallel_emit(self.event_bus.GENERATION_CHUNK, False, chunk = (thinking_chunk or "", content_chunk or "")) 
-        
-            await task            
+            
+            try:
+                await task  
+            except asyncio.CancelledError:
+                await self.change_state(CANCELLED)
+                raise  
+
         else:
-           async for (thinking_chunk, content_chunk, tools_chunk) in self.model.generate(query, self.context, False,
+           async for (thinking_chunk, content_chunk, tools_chunk) in self.model.generate(query, context, False,
                                                                                                         think=think, image_path=image_path, mod_ = mod_, 
                                                                                                         system_prompt_override=self.sys_override, options=self.options,
                                                                                                         format_=self.format,  tools_override=self.tools_override):
@@ -129,30 +140,46 @@ class GenerationSession:
                     break
 
                 if tools_chunk:
-                    tools_called.extend(tools_chunk)
+                    if INSTANT_TOOL_EXEC:
+                        await self.execute_tools(tools_chunk)
+                    else:
+                        tools_called.extend(tools_chunk)
 
                 thinking_final += thinking_chunk or ""
                 content_final += content_chunk or ""
 
-                yield (thinking_chunk or "", content_chunk or "")
+                tool_names = [t.get('function', {}).get('name', "") for t in tools_chunk] if tools_chunk else []
+
+                yield (thinking_chunk or "", content_chunk or "", tool_names)
                 if self.event_bus: await self.event_bus.parallel_emit(self.event_bus.GENERATION_CHUNK, False, chunk = (thinking_chunk or "", content_chunk or "")) 
 
         if self.query and self.query.strip(): 
             async with self.context_lock:
                 self.context.append({'role': 'user', 'content': query, FILE_NAME_KEY : image_path})
-        
-        if save_thinking:
-            m = {'role': 'assistant', 'thinking': thinking_final, 'content': content_final, 'tool_calls': tools_called} 
-        else: 
-            m = {'role': 'assistant','content': content_final, 'tool_calls': tools_called}
+        m = None
+        if not thinking_final.strip():
+            c, t = strip_thinking(content_final)
+            if c:
+                content_final = c
+            if t:
+                thinking_final = t
 
-        async with self.context_lock:
-            self.context.append(m)
+        if (thinking_final) or (content_final) or (tools_called):
+            if save_thinking:
+                m = {'role': 'assistant', 'thinking': thinking_final, 'content': content_final, 'tool_calls': tools_called} 
+            else: 
+                m = {'role': 'assistant','content': content_final, 'tool_calls': tools_called}
+
+        if m:
+            async with self.context_lock:
+                self.context.append(m)
 
         self.generation_task = None
-        await self.execute_tools(tools_called)
+        if not INSTANT_TOOL_EXEC: 
+            await self.execute_tools(tools_called)
         
-        await self.change_state(DONE)
+        if not self.regen:
+            await self.change_state(DONE)
         
     async def _ask_user_consent(self):
         if not self.regen_consent_callback: return False
@@ -200,9 +227,10 @@ class GenerationSession:
                 self.context = context
 
     async def run_generation_loop(self, stream, user_save_prefix= None, think = False, file_path=None, mod_= 10):
+        self.regen = False
         while True:
-            async for (thinking, response) in self.generate(stream, user_save_prefix, think, file_path, mod_, True): 
-                yield thinking, response
+            async for (thinking, response, tool) in self.generate(stream, user_save_prefix, think, file_path, mod_, True): 
+                yield thinking, response, tool
             if not self.regen: break
 
     async def _check_regen(self, tools:Iterable[Tool]):
@@ -232,11 +260,12 @@ class GenerationSession:
                     return False
 
     async def execute_tools(self, tools,):
-        await self.change_state(TOOLING)
         results = []  
         tools_objs = []  
-        if not tools:  
+        if not tools:
             return results  
+        
+        await self.change_state(TOOLING)
   
         for tool in tools:  
             if not isinstance(tool, dict) or 'function' not in tool:  

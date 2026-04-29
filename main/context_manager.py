@@ -49,6 +49,10 @@ class ContextManager:
         return context
 
     async def add_and_maintain(self, cid, data:dict | list[dict] | tuple[dict], update:bool = False):
+        if not cid in self.conversations:
+            await log(f"{cid} not in registry", 'error')
+            return
+        
         convo = self.conversations[cid]
         await convo.append(data, update)
         await convo.flush_queue()
@@ -61,7 +65,8 @@ class ContextManager:
                 convo.facts = f
                 convo.messages = c
 
-        await self.save(cid)
+        if not convo.temp:
+            await self.save(cid)
 
     async def get_context(self, cid):
         if not cid in self.conversations:
@@ -90,7 +95,20 @@ class ContextManager:
             return []
         c = self.conversations[cid]
         return await c.get_facts()
-        
+
+    async def create_temp_chat(self):
+        cid = str(uuid.uuid4())
+        while cid in self.conversations.keys():
+            cid = str(uuid.uuid4())
+
+        convo = Conversation("", cid)
+        convo.id = cid
+        convo.name = "Temporary chat"
+        convo.set_temp(True)
+        async with self.lock:
+            self.conversations[cid] = convo
+        return convo
+    
     async def new_conversation(self, name="New Chat"):
         cid = str(uuid.uuid4())
         while cid in self.conversations.keys():
@@ -115,11 +133,15 @@ class ContextManager:
         
         async with self.lock:
             c = self.conversations[cid]
-            p = c.path
-            if not os.path.exists(p):
-                await log(f"'{cid}'doesn't exist.", 'warn')
-                return 
-            await asyncio.to_thread(os.remove, p)
+            if not c.temp:
+                p = c.path
+                await c.save()
+                if not os.path.exists(p):
+                    await log(f"'{cid}'doesn't exist.", 'warn')
+                    return
+                
+                if not c.temp and os.path.exists(c.path):
+                    await asyncio.to_thread(os.remove, c.path)
 
             del self.conversations[cid]
     
@@ -134,7 +156,7 @@ class ContextManager:
                 'last_used': c.last_used
              
             }
-            for c in convos
+            for c in convos if not c.temp
         ]
         l = sorted(l, key=lambda x: x.get('last_used', 0), reverse=True)
         return l
@@ -185,8 +207,9 @@ class ContextManager:
                 self.conversations[i] = c
     
     async def save_all(self):
-        for i in self.conversations.values():
-            await i.save()
+        for i in list(self.conversations.values()):
+            if not i.temp:
+                await i.save()
 
 class Conversation:
     def __init__(self, path:str, uuid_= None) -> None:
@@ -199,6 +222,10 @@ class Conversation:
         self.id = uuid_ or str(uuid.uuid4())
         self.name = "New chat"
         self.last_used = -1
+        self.temp = False
+
+    def set_temp(self, val:bool):
+        self.temp = val
 
     async def load(self):
         try:
@@ -222,6 +249,9 @@ class Conversation:
             self.last_used = -1
 
     async def save(self, path:str | None = None):
+        if self.temp:
+            await log("Temporary conversations cannot be saved", 'warn')
+            return
         try:
             await self.flush_queue()
             async with self.lock:
@@ -236,12 +266,12 @@ class Conversation:
 
     async def append(self, data:dict | list[dict] | tuple[dict], update:bool = False): 
         if not update:
-            if type(data) == dict:
+            if isinstance(data, dict):
         
                 await self.queue.put(data)
                 async with self.lock: 
                     self.last_used=  datetime.datetime.now().timestamp()
-            elif type(data) in [list, tuple]:
+            elif isinstance(data, (list, tuple)):
                 for d in data: 
                     await self.queue.put(d)
         
@@ -250,7 +280,7 @@ class Conversation:
             else: 
                 await log("unknown data type, skipping item.", "warn")
         else:
-            if not type(data) in [list, tuple]:
+            if not isinstance(data, (list, tuple)):
                 raise TypeError
             
             async with self.lock:
@@ -263,15 +293,20 @@ class Conversation:
             return
 
         items = []
-        while not self.queue.empty():
-            items.append(await self.queue.get())
-
+        
         async with self.lock:
+            while True:
+                try:
+                    items.append(self.queue.get_nowait())
+                except asyncio.QueueEmpty:
+                    break
+
             self.messages.extend(items)
 
     async def get_context(self):
         async with self.lock:
-            return deepcopy(list(self.messages))
+            context = deepcopy(list(self.messages))
+            return context
 
     async def get_summary(self):
         async with self.lock:

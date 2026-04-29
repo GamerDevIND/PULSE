@@ -12,7 +12,7 @@ def chunk(text:str, limit=700, overlap_size= 1) -> list[str]:
     paragraphs = [p.strip() for p in re.split(r'\n\s*\n', text) if p.strip()]
     
     if len(paragraphs) <= 1:
-        sentences = re.split(r'(?<!\b(?:Mr|Mrs|Dr|Prof|Sr|Jr|vs|etc)\.)(?<=[.!?])\s+', text)
+        sentences = re.split(r"(?<!\b(?:Mr|Mrs|Dr|Prof|Sr|Jr|vs|etc)\.)(?<=[.!?])\s+", text)
         if len(sentences) <= 1:
             words = text.split()
             step = max(1, int(limit / 1.3))

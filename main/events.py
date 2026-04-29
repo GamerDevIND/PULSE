@@ -2,6 +2,7 @@ from .utils import log
 import inspect
 import asyncio
 import threading
+from datetime import datetime
 
 class EventBus:
     GENERATION_CHUNK = "generation chunk"
@@ -60,7 +61,7 @@ class EventBus:
                 del self.listeners[event_name]
 
     async def sequence_emit(self, event_name,should_log = True, **event):
-        if should_log: await log(f"Event '{event_name}' emitted with parameter(s): {event}", 'info')
+        if should_log: await log(f"Event '{event_name}' emitted with parameter(s): {event}; Timestamp: {datetime.now().isoformat()}", 'info')
         with self._lock:
             listeners = self.listeners.get(event_name, set())
         for listener in list(listeners):
@@ -72,7 +73,7 @@ class EventBus:
                 await log(f"'{event_name}' tried to call function: '{listener.__name__}' with {event}. Error: {repr(e)}. Skipping...", 'warn')
 
     async def parallel_emit(self, event_name,should_log = True, **event):
-        if should_log: await log(f"Event '{event_name}' emitted with parameter(s): {event}", 'info')
+        if should_log: await log(f"Event '{event_name}' emitted with parameter(s): {event}; Timestamp: {datetime.now().isoformat()}", 'info')
         with self._lock:
             listeners = self.listeners.get(event_name, set())
         l = []

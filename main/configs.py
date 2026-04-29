@@ -7,8 +7,10 @@ ERROR_TOKEN = "ERROR_TOKEN"
 FILE_NAME_KEY = 'file_path'
 EMBEDDING_MODEL_ROLE = "embedding"
 RAG_MIN_SCORE = 0.4
+# May affect streaming speed:
+INSTANT_TOOL_EXEC: bool = False # Instantly execute the tool as soon it appears in the stream instead of collecting every tool call in the stream before execution.
 ENV_READ_PREFIX = '$'
-USERNAME = "User"
+USERNAME = User
 
 DEFAULT_PROMPT: str = r"""
 [Your default/fallback prompt for models.]
@@ -63,7 +65,6 @@ CHAOS_PROMPT = r"""
 VISION_PROMPT = r'''
 [Your prompt for the vision models]
 '''
-
 
 # Your prompt for the summariser. Keep it empty or set to None to use the default one.
 SUMMARIZER_PROMPT = ""

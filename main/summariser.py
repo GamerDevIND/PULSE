@@ -36,7 +36,7 @@ class Summariser:
         contents = [x.get("content", "").strip() for x in context if x.get("content")]
         if prev_summary: contents.append(prev_summary)
         if prev_facts: contents.extend(prev_facts)
-        
+
         if estimate_tokens(" ".join(contents)) >= self.summary_max_tokens:  
             if self.event_bus:
                 await self.event_bus.sequence_emit(self.event_bus.SUMMARISING)
@@ -47,10 +47,10 @@ class Summariser:
             current_keep_tokens = 0
             for msg in context[keep_idx:]:
                 if msg.get('role', '') != 'tool':
-                    current_keep_tokens += len(msg.get("content", "").split()) * 1.3
+                    current_keep_tokens += estimate_tokens(msg.get("content", "").strip())
 
             for msg in reversed(context[:keep_idx]):
-                msg_tokens = len(msg.get("content", "").split()) * 1.3
+                msg_tokens = estimate_tokens(msg.get("content", "").strip())
                 if (current_keep_tokens + msg_tokens > self.summary_keep_tokens_after) and keep_idx > 0:
                     break
 
@@ -68,13 +68,22 @@ class Summariser:
                 role = t['role']
                 content = t['content']
 
-                message_tokens = len(f"<{role}> {content} </{role}>\n".strip().split()) * 1.3
+                message_tokens = estimate_tokens(f"<{role}> {content} </{role}>\n".strip())
 
                 if used + message_tokens > chunk_budget:
                     break 
 
                 if role != 'tool':
                     text += f"<{role}> {content} </{role}>\n"
+                elif role == 'tool':
+                    try:
+                        tc = json.dumps(content)
+                    except json.JSONDecodeError:
+                        tc = ""
+                    
+                    if tc:
+                        name = t['tool_name']
+                        text += f"<{role} (Name: {name})> {content} </{role}>\n"
 
                 used += message_tokens
             
@@ -106,8 +115,7 @@ class Summariser:
             entry = None  
             try:  
                 async for (_, out, _ )in self.model.generate(text, [], stream=False, system_prompt_override=system, format_=self.format):  
-                    if out != ERROR_TOKEN and (out and isinstance(out, str) and out.strip()):  
-
+                    if out != ERROR_TOKEN and (out and isinstance(out, str) and out.strip()):
                         entry = out
 
             except Exception as e:  
@@ -115,6 +123,8 @@ class Summariser:
                 if self.event_bus:
                     await self.event_bus.sequence_emit(self.event_bus.SUMMARISING_FAILED, error=str(e))
 
+            summary = prev_summary
+            facts = prev_facts
             if entry:
                 try:
                     entry = json.loads(entry)
@@ -123,7 +133,7 @@ class Summariser:
                 except json.JSONDecodeError:
                     await log("Summariser json failed", "warn")
                     return prev_summary, prev_facts, context 
-
+                
                 summary = entry["summary"]
                 facts = entry["facts"]  
                 context = to_keep 

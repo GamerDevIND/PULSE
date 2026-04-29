@@ -33,7 +33,7 @@ class Router:
             "required": ["role"]
           }
 
-    async def route_query(self, query: str, context, manual: bool | None):
+    async def route_query(self, query: str, context, manual: bool | None, include_chaos = True):
         if not manual:
             if not self.model:
                 await log("Router model not configured. Using default.", "error")
@@ -87,21 +87,16 @@ class Router:
         else:
             return await self.parse_query(query)
 
-    async def parse_query(self, query): # i might add automatic role parsing later
-        if query.startswith(f"{self.manual_prefix}chat"):
-            query = query.removeprefix(f"{self.manual_prefix}chat").strip()
-            return query, "chat"
-        elif query.startswith(f"{self.manual_prefix}cot"):
-            query = query.removeprefix(f"{self.manual_prefix}cot").strip()
-            return query, "cot"
-        elif query.startswith(f"{self.manual_prefix}chaos"):
-            query = query.removeprefix(f"{self.manual_prefix}chaos").strip()
-            return query, "chaos"
-        elif query.startswith(f"{self.manual_prefix}vision"):
-            query = query.removeprefix(f"{self.manual_prefix}vision").strip()
- 
-            return query, "vision"
-        else:
-            await log(f"No or incorrect prefix, using default '{self.fallback_role}'", "info")
+    async def parse_query(self, query:str, include_chaos = True): # i might add automatic role parsing later
+
+        roles = list(map(lambda x: x.strip(), self.available_roles))
+        if not 'chaos' in roles and include_chaos:
+            roles.append('chaos')
+
+        for role in roles:
+            if query.strip().startswith(f"{self.manual_prefix}{role}"):
+                return query[len(f"{self.manual_prefix}{role}"):].strip(), role
+            
+        await log(f"No or incorrect prefix, using default '{self.fallback_role}'", "info")
               
-            return query, self.fallback_role
+        return query, self.fallback_role

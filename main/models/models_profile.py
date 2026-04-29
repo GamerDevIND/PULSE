@@ -45,7 +45,7 @@ class RemoteModel(OllamaModel):
             'options': {'keep_alive': 0}
         }
         if self.warmed_up:
-            await self.resource_manager.shutdown(url, headers, payload, True,)
+            await self.resource_manager.shutdown(True, url, headers, payload, True,)
             
         await log(F"{self.name} shutting down success", 'info')
         await self.change_state(DOWN)
@@ -76,7 +76,7 @@ class RemoteEmbedder(OllamaEmbedder):
             "input": "bye",
             'options': {'keep_alive': 0}
         }
-        await self.resource_manager.shutdown(url, headers, payload, True,)
+        await self.resource_manager.shutdown(True, url, headers, payload, True,)
         await log(F"{self.name} shutting down success", 'info')
         await self.change_state(DOWN)
         if self.event_bus: await self.event_bus.parallel_emit(self.event_bus.INFO, msg = f"Model shutdown: {self.name} ({self.model_name})")
