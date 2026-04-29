@@ -668,12 +668,65 @@ textarea {
     color: #e0e0e0;
 }
 
+/* Base Style */
 .full-settings-link {
-    margin-top: auto;
-    color: #007bff;
+    display: block;
+    /* Makes the width/padding behave like a button */
+    margin-top: 20px;
+    color: #a5effd;
     text-decoration: none;
     text-align: center;
     padding: 10px;
-    border: 1px solid #007bff;
+    border: 1px solid #00d4ff;
     border-radius: 6px;
+    transition: all 0.3s ease;
+    /* Smooth transition for hover */
+}
+
+.full-settings-link:hover {
+    color: #ffffff;
+    background-color: #00748b;
+    border-color: #00748b;
+}
+
+.full-settings-link:active {
+    background-color: #034388;
+    transform: translateY(1px);
+    /* Slight click effect */
+}
+
+.models_details {
+    margin-top: 10px;
+    padding: 10px;
+    background: rgba(255, 255, 255, 0.03);
+    border-radius: 8px;
+}
+
+.model_details {
+    font-size: 0.85rem;
+    color: #bbb;
+}
+
+.model_status {
+    font-size: 0.75rem;
+    text-transform: uppercase;
+    color: rgb(109, 109, 109);
+    letter-spacing: 1px;
+}
+
+.model_role {
+    font-weight: normal;
+    font-size: 0.8rem;
+    color: rgb(150, 150, 150);
+    margin-left: 5px;
+}
+
+.model_id {
+    display: block;
+    font-family: 'Courier New', Courier, monospace;
+    margin-top: 2px;
+    font-size: 0.75rem;
+    color: rgb(100, 100, 100);
+    margin-top: 2px;
+    font-family: monospace;
 }

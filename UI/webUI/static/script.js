@@ -183,25 +183,57 @@ document.addEventListener('DOMContentLoaded', () => {
 const settingsToggle = document.getElementById('settings-toggle');
 const settingsPanel = document.getElementById('settings-panel');
 
-settingsToggle.addEventListener('click', () => {
-    const isOpen = settingsPanel.classList.toggle('active');
-    settingsToggle.classList.toggle('open');
+function closeSettings() {
+    settingsPanel.classList.remove('active');
+    settingsToggle.classList.remove('open');
+    settingsToggle.innerText = '⚙';
+    settingsToggle.style.background = '#363636';
+}
+
+function openSettings() {
+    settingsPanel.classList.add('active');
+    settingsToggle.classList.add('open');
+    settingsToggle.innerText = '✕';
+    settingsToggle.style.background = '#801c1c';
+}
+
+settingsToggle.addEventListener('click', (e) => {
+    e.stopPropagation(); 
     
-    if (isOpen) {
-        settingsToggle.innerText = '✕';
-        settingsToggle.style.background = '#801c1c';
+    if (settingsPanel.classList.contains('active')) {
+        closeSettings();
     } else {
-        settingsToggle.innerText = '⚙';
-        settingsToggle.style.background = '#363636';
+        openSettings();
     }
 });
 
-// Optional: Close panel if clicking outside
 document.addEventListener('click', (e) => {
-    if (!settingsPanel.contains(e.target) && !settingsToggle.contains(e.target)) {
-        settingsPanel.classList.remove('active');
-        settingsToggle.classList.remove('open');
-        settingsToggle.innerText = '⚙';
-        settingsToggle.style.background = '#363636';
+    if (settingsPanel.classList.contains('active')) {
+        if (!settingsPanel.contains(e.target) && !settingsToggle.contains(e.target)) {
+            closeSettings();
+        }
     }
 });
+
+async function updateModelStatuses() {
+    try {
+        const response = await fetch('/api/models-status');
+        if (!response.ok) return;
+        const models = await response.json();
+
+        models.forEach(model => {
+            const container = document.querySelector(`.model-row[data-model="${model.name}"]`);
+            
+            if (container) {
+                const statusEl = container.querySelector('.js-status');
+                if (statusEl && statusEl.innerText !== model.state) {
+                    statusEl.innerText = model.state;
+                }
+            }
+        });
+    } catch (err) {
+        console.error("Status check failed. Pulse backend might be busy.");
+    }
+}
+
+setInterval(updateModelStatuses, 500);

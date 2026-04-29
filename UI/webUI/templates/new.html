@@ -14,19 +14,44 @@
             
             <div id="settings-panel" class="settings-panel">
                 <h2>System Settings</h2>
+                <br>
                 <div class="settings-item">
                     <span>Username:</span>
                     <strong>{{ name }}</strong>
                 </div>
+                <br>
                 <div class="settings-item">
                     <span>Mode:</span>
                     <strong class="mode-tag">{{ mode if mode else 'N/A' }}</strong>
                 </div>
+                <br>
                 <div class="settings-item">
-                    <span>Estimated Tokens:</span>
+                    <span>Estimated:</span>
                     <strong>{{ estimated_tokens if estimated_tokens else 0 }} tokens</strong>
                 </div><br>
-                <a href="" class="full-settings-link">View Advanced Config</a>
+                <div class="models_details">
+                    {% if models_status %}
+                        <p style="color: #00d4ff; font-size: 0.8rem; margin-bottom: 10px; border-bottom: 1px solid #333;">Active Models</p>
+                        {% for status in models_status %}
+                            <div class="settings-item model-row" data-model="{{ status.name }}" style="flex-direction: column; align-items: flex-start; margin-bottom: 15px;">
+                                <div style="display: flex; justify-content: space-between; width: 100%;">
+                                    <div>
+                                        <strong style="color: #fff;">{{ status.name }}</strong> 
+                                        <span class="model_role">[{{ status.role }}]</span>
+                                    </div>
+                                    <strong class="model_status js-status">
+                                        {{ status.state }}
+                                    </strong>
+                                </div>
+                                <div class="model_id">
+                                    {{ status.model_name }}
+                                </div>
+                            </div>
+                        {% endfor %}
+                    {% endif %}
+                </div>
+                <br>
+                <a href="/settings/" class="full-settings-link">View Advanced Config</a>
             </div>
         </div>
 
@@ -79,8 +104,7 @@
                                 </details>
 
                             {% endif %}
-
-           
+                               
 
                             <div class="content-text">
 
@@ -100,7 +124,7 @@
 
             <div class="greeting-container" id="greeting">
 
-                <h1>{{ greeting }}, {{ name }}.</h1>
+                <h1>{{ greeting }}</h1>
 
                 <p>How can I help you?</p>
 

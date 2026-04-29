@@ -40,11 +40,11 @@ async def main():
     @ai.event(ai.event_bus.SHUTTING_DOWN)
     async def a():
         await shutdown()
-    ai.event(ai.event_bus.SHUTDOWN)
+    @ai.event(ai.event_bus.SHUTDOWN)
     def b():
         print("Shut down successful")
 
-    ai.event(ai.event_bus.CANCELLING_SESSION)
+    @ai.event(ai.event_bus.CANCELLING_SESSION)
     def cancel(**_):
         print(f"Session: was cancelled")
 
@@ -145,9 +145,11 @@ async def main():
             gen = await ai.create_generation(req, manual_routing=False, file_path=image_path, use_memory=False)
 
             if not gen:
-                return
+                continue
             
-            async for (thinking, response) in gen.stream():
+            async for (thinking, response, _ts_) in gen.stream():
+                if _ts_:
+                    print(f"calling tool(s): {_ts_}")
                 if thinking:
                     print(f"{colorama.Fore.LIGHTBLACK_EX}{thinking}{colorama.Style.RESET_ALL}", end="", flush=True)
                 if response:

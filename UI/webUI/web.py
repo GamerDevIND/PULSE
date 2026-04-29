@@ -7,24 +7,38 @@ sys.path.append(str(root_path))
 import asyncio
 from quart import Quart, render_template, jsonify, request, Response, stream_with_context
 import datetime
+import random
 
 from main.AI import AI
 from main.utils import log, estimate_tokens
-from main.configs import USERNAME
+from main.configs import USERNAME, DEFAULT_PROMPT, CHAOS_PROMPT, RAG_MIN_SCORE
 
 app = Quart(__name__)
 ai = AI("main/openrouter_models_configs.json", mode='openrouter', use_RAG=False)
 
 def get_greeting():
-    now = datetime.datetime.now()
-    h = now.hour
-    if 12 > h >= 4:
-        greeting = "Good Morning"
-    elif 12 <= h < 18:
-        greeting = "Good Afternoon"
-    else:
-        greeting = "Good Evening"
-    
+    random.seed(random.randint(-10000, 10000))
+    def formal():
+        now = datetime.datetime.now()
+        h = now.hour
+        if 12 > h >= 4:
+            greeting = "Good Morning"
+        elif 12 <= h < 18:
+            greeting = "Good Afternoon"
+        else:
+            greeting = "Good Evening"
+        
+        return greeting
+
+    greetings:list[str] = []
+    greetings.append(formal())
+    greetings.append("Good to see you")
+    greetings.append("Welcome")
+    greetings = list(map(lambda x : x + f", {USERNAME}.", greetings))
+    greetings.append("What's on your mind today?")
+    greetings.append("What are we doing today?")
+    greetings.append("Where should we start?")
+    greeting = random.choice(greetings)
     return greeting
 
 shutdown_event = asyncio.Event()
@@ -48,7 +62,8 @@ async def index():
     return await render_template("new.html", greeting = current_greeting, name = USERNAME, 
                                  chats = await ai.context_manager.list_conversations(),
                                  estimated_tokens = 0,
-                                 mode = ai.mode,)
+                                 mode = ai.mode,
+                                 models_status = ai.backend.get_models_state() if ai.backend else [])
 
 @app.route('/chat/<cid>')
 async def chat_view(cid):
@@ -61,17 +76,19 @@ async def chat_view(cid):
         words = [c["content"] for c in await chat.get_context()]
         words = " ".join(words)
         est = round(estimate_tokens(words))
-        
-        return await render_template("new.html", 
-                                     greeting="",
-                                     name=USERNAME, 
-                                     chats=chats, 
-                                     current_chat=chat,
-                                     history=chat_data,
-                                     summary = chat_summary,
-                                     facts = chat_facts,
-                                     estimated_tokens = est,
-                                     mode = ai.mode,)
+        c = {
+            "greeting": "",
+            "name": USERNAME, 
+            "chats":chats, 
+            "current_chat": chat,
+            "history": chat_data,
+            "summary": chat_summary,
+            "facts": chat_facts,
+            "estimated_tokens": est,
+            "mode": ai.mode,
+            "models_status": ai.backend.get_models_state() if ai.backend else []
+        }
+        return await render_template("new.html", **c)
     except KeyError:
         return "Chat not found", 404
     
@@ -79,7 +96,7 @@ async def chat_view(cid):
 async def new_chat():
     data = await request.get_json()
     query = data.get('message')
-    
+
     c = await ai.context_manager.new_conversation()
     
     gen = await ai.create_generation(query, cid=c.id, use_memory=False)
@@ -88,10 +105,10 @@ async def new_chat():
         return "Generation creation failed", 500
     
     async def generate():
-        yield json.dumps({"chat_id": c.id, "content": "", "thinking": ""}) + "\n"
+        yield json.dumps({"chat_id": c.id, "content": "", "thinking": "", "tools": []}) + "\n"
         
-        async for thinking, content in gen.stream():
-            out = json.dumps({"thinking": thinking, "content": content}) + "\n"
+        async for thinking, content, tools in gen.stream():
+            out = json.dumps({"thinking": thinking, "content": content, "tools": tools}) + "\n"
             yield out
 
     return Response(stream_with_context(generate)(), mimetype='application/x-ndjson')
@@ -120,8 +137,8 @@ async def send_message(cid):
     
     async def generate():
         try:
-            async for thinking, content in gen.stream():
-                out = json.dumps({"thinking": thinking, "content": content}) + "\n"
+            async for thinking, content, tools in gen.stream():
+                out = json.dumps({"thinking": thinking, "content": content, "tools": tools}) + "\n"
                 yield out
                 
         except asyncio.CancelledError:
@@ -130,6 +147,50 @@ async def send_message(cid):
             await log(f"Stream cancelled for {cid}", "warn")
 
     return Response(generate(), mimetype='application/x-ndjson')
+
+@app.route("/settings", strict_slashes=False)
+async def settings():
+    system_prompts = ai.system_prompts.copy()
+    system_prompts.update({'default': DEFAULT_PROMPT, 'chaos': CHAOS_PROMPT})
+    config_state = {
+        "username": USERNAME,
+        "mode": ai.mode,
+        "use_rag": getattr(ai, 'use_RAG', False),
+        "models_status": ai.backend.get_models_state() if ai.backend else [],
+        'system_prompts': ai.system_prompts,
+        "rag_min_score": RAG_MIN_SCORE
+    }
+
+    return await render_template('full_details.html', **config_state)
+
+@app.route('/api/models-status')
+async def models_status_api():
+    states = ai.backend.get_models_state() if ai.backend else []
+    return jsonify(states)
+
+@app.post("/temp_chat", methods=['POST'])
+async def one_time_chat():
+    cid = 0
+    try:
+        data = await request.get_json()
+        query = data.get('message')
+        c = await ai.context_manager.create_temp_chat()
+        cid = c.id
+        gen = await ai.create_generation(query, cid, use_memory=False)
+        if not gen:
+            return "Generation creation failed", 500
+        async def generate():
+            yield json.dumps({"chat_id": c.id, "content": "", "thinking": "", "tools": []}) + "\n"
+            
+            async for thinking, content, tools in gen.stream():
+                out = json.dumps({"thinking": thinking, "content": content, "tools": tools}) + "\n"
+                yield out
+
+        return Response(stream_with_context(generate)(), mimetype='application/x-ndjson')
     
+    except asyncio.CancelledError as e:
+        await ai.context_manager.delete_conversation(cid)
+        return json.dumps({"chat_id": cid, "content": "", "thinking": ""}) + "\n"
+
 if __name__ == "__main__":
-    app.run(debug=True, use_reloader=False,)
+    app.run(debug=True,)
