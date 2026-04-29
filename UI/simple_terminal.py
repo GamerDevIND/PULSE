@@ -68,7 +68,7 @@ async def main():
     def tool(tool_name, **_):
         print(f"Executing tool :{tool_name}")
         
-    ai.event(ai.event_bus.TOOLS_EXECUTED)
+    @ai.event(ai.event_bus.TOOLS_EXECUTED)
     def tools(**_):
         print("Tools executed")
 
