@@ -14,7 +14,7 @@ from main.utils import log, estimate_tokens
 from main.configs import USERNAME, DEFAULT_PROMPT, CHAOS_PROMPT, RAG_MIN_SCORE
 
 app = Quart(__name__)
-ai = AI("main/Models_configs.json", mode='openrouter', use_RAG=False)
+ai = AI("main/openrouter_models_configs.json", mode='openrouter', use_RAG=False)
 
 def get_greeting():
     random.seed(random.randint(-10000, 10000))
@@ -169,28 +169,28 @@ async def models_status_api():
     return jsonify(states)
 
 @app.route("/temp_chat", methods=['POST'])
-async def temp_chat():
-    cid = 0
-    try:
-        data = await request.get_json()
-        query = data.get('message')
-        c = await ai.context_manager.create_temp_chat()
-        cid = c.id
-        gen = await ai.create_generation(query, cid, use_memory=False)
-        if not gen:
-            return "Generation creation failed", 500
-        async def generate():
-            yield json.dumps({"chat_id": c.id, "content": "", "thinking": "", "tools": []}) + "\n"
+async def temp_chat_endpoint():
+    data = await request.get_json()
+    query = data.get('message')
+    
+    c = await ai.context_manager.create_temp_chat()
+    cid = c.id
+    
+    gen = await ai.create_generation(query, cid=cid, use_memory=False)
+    if not gen:
+        return jsonify({"error": "Generation failed"}), 500
+
+    async def generate():
+        try:
+            yield json.dumps({"chat_id": cid, "content": "", "thinking": "", "tools": []}) + "\n"
             
             async for thinking, content, tools in gen.stream():
-                out = json.dumps({"thinking": thinking, "content": content, "tools": tools}) + "\n"
-                yield out
+                yield json.dumps({"thinking": thinking, "content": content, "tools": tools}) + "\n"
+                
+        except asyncio.CancelledError as e:
+            await ai.context_manager.delete_conversation(cid)
 
-        return Response(stream_with_context(generate)(), mimetype='application/x-ndjson')
-    
-    except asyncio.CancelledError as e:
-        await ai.context_manager.delete_conversation(cid)
-        return json.dumps({"chat_id": cid, "content": "", "thinking": ""}) + "\n"
+    return Response(stream_with_context(generate)(), mimetype='application/x-ndjson')
 
 if __name__ == "__main__":
     app.run(debug=True,)

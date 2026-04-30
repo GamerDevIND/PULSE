@@ -10,7 +10,7 @@
     <div class="app-container">
 
         <div class="settings-container">
-            <button id="settings-toggle" class="settings_icon">⚙</button>
+            <button id="settings-toggle" class="settings_icon" title="View settings">⚙</button>
             
             <div id="settings-panel" class="settings-panel">
                 <h2>System Settings</h2>
@@ -31,7 +31,7 @@
                 </div><br>
                 <div class="models_details">
                     {% if models_status %}
-                        <p style="color: #00d4ff; font-size: 0.8rem; margin-bottom: 10px; border-bottom: 1px solid #333;">Active Models</p>
+                        <p class="active-models">Active Models</p>
                         {% for status in models_status %}
                             <div class="settings-item model-row" data-model="{{ status.name }}" style="flex-direction: column; align-items: flex-start; margin-bottom: 15px;">
                                 <div style="display: flex; justify-content: space-between; width: 100%;">
@@ -55,29 +55,49 @@
             </div>
         </div>
 
+        {% if not history %}
+        <div class="quick-actions">
+            <button class="temp-chat-btn" title="Temporary Chat">💬 Temp chat</button>
+        </div>
+        {% endif %}
+
         <aside class="sidebar">
 
             <div class="sidebar-header">
 
                 <h3>Conversations</h3>
 
-                <button class="new-chat-btn">New Chat</button>
+                <button class="new-chat-btn" title="Start a new conversation">New Chat</button>
 
             </div>
 
             <nav class="chat-list">
-
                 {% for chat in chats %}
-
-                    <a href="/chat/{{ chat.id }}" class="chat-item {% if current_chat and chat.id == current_chat.id %}active{% endif %}">
-
+                    <a href="/chat/{{ chat.id }}" 
+                       class="chat-item {% if current_chat and chat.id == current_chat.id %}active{% endif %}" 
+                       data-cid="{{ chat.id }}">
                         <span class="chat-name">{{ chat.name }}</span>
-
+                        <button class="menu-dots" onclick="event.preventDefault(); showContextMenu(event, '{{ chat.id }}')">⋮</button>
                     </a>
-
                 {% endfor %}
-
+                <div id="delete-modal" class="modal-overlay" style="display:none;">
+                    <div class="modal-content">
+                        <h3>Delete Chat?</h3>
+                        <p>This action cannot be undone.</p>
+                        <div class="modal-actions">
+                            <button id="confirm-delete" class="btn-danger">Delete</button>
+                            <button id="cancel-delete" class="btn-secondary">Cancel</button>
+                        </div>
+                    </div>
+                </div>
             </nav>
+
+            <div id="custom-context-menu" class="context-menu" style="display: none; position: absolute; z-index: 1000;">
+                <ul class="context-menu-list">
+                    <li class="context-opt-rename" title="Rename conversation">Rename</li>
+                    <li class="context-opt-delete" title="Delete conversation">Delete</li>
+                </ul>
+            </div>
 
         </aside>
 
@@ -126,8 +146,8 @@
 
                 <h1>{{ greeting }}</h1>
 
-                <p>How can I help you?</p>
-
+                <p class="paragraph-greeting">How can I help you?</p>
+                
             </div>
 
             {% endif %}
@@ -135,7 +155,7 @@
             <div class="input-container">
 
                 <div class="input-area">
-                    <textarea id="user-input" placeholder="Type your query here..." autofocus></textarea>
+                    <textarea id="user-input" placeholder="Is there anything I can help with?" autofocus></textarea>
                     <button id="send-btn" title="Send Message">↑</button>
                 </div>
             </div>

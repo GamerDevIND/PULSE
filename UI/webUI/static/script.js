@@ -1,12 +1,15 @@
 // import { marked } from "https://cdn.jsdelivr.net/npm/marked/lib/marked.esm.js";
 
 document.addEventListener('DOMContentLoaded', () => {
-    const textarea = document.querySelector('.input-area textarea');
     const sendButton = document.querySelector("#send-btn");
     const newChatBtn = document.querySelector('.new-chat-btn');
     const chatDisplay = document.querySelector('.chat-display');
     const greetingContainer = document.querySelector('.greeting-container');
     const contextMenu = document.getElementById('custom-context-menu');
+    let isTempMode = false;
+    const tempToggle = document.querySelector('.temp-chat-btn');
+    const textarea = document.getElementById('user-input');
+    const para = document.querySelector(".paragraph-greeting");
     
     let isNewLine = false;
     let currentChatId = null;
@@ -17,6 +20,42 @@ document.addEventListener('DOMContentLoaded', () => {
     if (pathParts.length > 2 && pathParts[1] === 'chat') {
         currentChatId = pathParts[2];
         if (greetingContainer) greetingContainer.style.display = 'none';
+    }
+
+    if (tempToggle) {
+        tempToggle.addEventListener('click', (e) => {
+            e.preventDefault();
+            
+            isTempMode = !isTempMode;
+            
+            tempToggle.classList.toggle('active', isTempMode);
+            
+            if (isTempMode) {
+                tempToggle.innerText = "🗨️ Normal chat";
+                textarea.placeholder = "Temporary Chat: Is there anything I can help with?";
+                tempToggle.classList.add("active")
+                para.innerHTML = "<strong>Temporary Chat:</strong> History won't be saved."
+                document.title = "Temporary Chat"
+                if (tempToggle) tempToggle.addEventListener('click', () => window.location.href = '/');
+                
+            } else {
+                document.querySelectorAll('.chat-item').forEach(el => el.classList.remove('active'));
+
+            if (isTempMode) {
+                textarea.placeholder = "Temporary Chat: Is there anything I can help with?";
+                tempToggle.innerText = "🗨️ Normal chat";
+                if (para) para.innerText = "Temporary Chat: History won't be saved.";
+                document.title = "Temporary Chat"
+            } else {
+                textarea.placeholder = "Is there anything I can help with?";
+                tempToggle.innerText = "💬 Temp chat";
+                if (para) para.innerText = "How can I help you?";
+                document.title = "New Chat"
+            }
+            }
+            
+            textarea.focus();
+        });
     }
 
     textarea.addEventListener('keydown', (e) => {
@@ -52,21 +91,110 @@ document.addEventListener('DOMContentLoaded', () => {
         if (contextMenu) contextMenu.style.display = 'none';
     });
 
+    const deleteModal = document.getElementById('delete-modal');
+    const confirmDeleteBtn = document.getElementById('confirm-delete');
+    const cancelDeleteBtn = document.getElementById('cancel-delete');
+
     async function handleRename(cid) {
-        const newName = prompt("Enter new chat name:");
-        if (!newName) return;
-        const res = await fetch(`/chat/${cid}/rename`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ name: newName })
+        const chatItem = document.querySelector(`.chat-item[href*="${cid}"]`);
+        const nameSpan = chatItem.querySelector('.chat-name');
+        const originalName = nameSpan.innerText;
+
+        const input = document.createElement('input');
+        input.type = 'text';
+        input.value = originalName;
+        input.classList.add('rename-input');
+        nameSpan.replaceWith(input);
+        input.focus();
+        input.select();
+    
+        const saveRename = async () => {
+            const newName = input.value.trim();
+            if (newName && newName !== originalName) {
+                const res = await fetch(`/chat/${cid}/rename`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ name: newName })
+                });
+                if (res.ok) {
+                    const newSpan = document.createElement('span');
+                    newSpan.classList.add('chat-name');
+                    newSpan.innerText = newName;
+                    input.replaceWith(newSpan);
+                }
+            } else {
+
+                nameSpan.innerText = originalName;
+                input.replaceWith(nameSpan);
+            }
+        };
+    
+        input.addEventListener('blur', saveRename);
+        input.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') input.blur();
+            if (e.key === 'Escape') { input.value = originalName; input.blur(); }
         });
-        if (res.ok) window.location.reload();
+    }
+
+
+    function openDeleteModal(cid) {
+        targetChatId = cid;
+        deleteModal.style.display = 'flex';
     }
 
     async function handleDelete(cid) {
-        if (!confirm("Delete this conversation?")) return;
-        const res = await fetch(`/chat/${cid}/delete`, { method: 'DELETE' });
-        if (res.ok) window.location.href = '/';
+        cancelDeleteBtn.addEventListener('click', () => {
+            deleteModal.style.display = 'none';
+        });
+        
+        deleteModal.addEventListener('click', (e) => {
+            if (e.target === deleteModal) {
+                deleteModal.style.display = 'none';
+            }
+        });
+        cancelDeleteBtn.onclick = () => deleteModal.style.display = 'none';
+        confirmDeleteBtn.onclick = async () => {
+            if (!targetChatId) return;
+
+            confirmDeleteBtn.disabled = true;
+            confirmDeleteBtn.innerText = "Deleting...";
+
+            const res = await fetch(`/chat/${targetChatId}/delete`, { method: 'DELETE' });
+            if (res.ok) {
+                window.location.href = '/';
+            } else {
+                alert("Failed to delete chat.");
+                confirmDeleteBtn.disabled = false;
+                confirmDeleteBtn.innerText = "Delete";
+                deleteModal.style.display = 'none';
+            }
+    };
+
+    }
+
+    document.addEventListener('click', (e) => {
+        if (e.target.classList.contains('context-opt-rename')) {
+            handleRename(targetChatId);
+        } else if (e.target.classList.contains('context-opt-delete')) {
+            openDeleteModal(targetChatId);
+        }
+        
+        if (e.target.classList.contains('menu-dots')) {
+            e.preventDefault();
+            e.stopPropagation();
+            const cid = e.target.closest('.chat-item').getAttribute('href').split('/').pop();
+            openMenu(e, cid);
+        } else {
+            if (contextMenu) contextMenu.style.display = 'none';
+        }
+    });
+
+    function openMenu(e, cid) {
+        targetChatId = cid;
+        contextMenu.style.display = 'block';
+        
+        contextMenu.style.left = `${e.pageX}px`;
+        contextMenu.style.top = `${e.pageY}px`;
     }
 
     document.querySelectorAll('.opt-rename').forEach(el => el.onclick = (e) => { e.preventDefault(); handleRename(el.closest('.chat-item').getAttribute('href').split('/').pop()); });
@@ -87,7 +215,14 @@ document.addEventListener('DOMContentLoaded', () => {
         isWaitingForResponse = true;
         sendButton.disabled = true;
 
-        const endpoint = currentChatId ? `/chat/${currentChatId}` : '/chat/new';
+        let endpoint;
+
+        if (isTempMode) {
+            endpoint = currentChatId ? `/chat/${currentChatId}` : '/temp_chat';
+        }
+        else {
+            endpoint = currentChatId ? `/chat/${currentChatId}` : '/chat/new';
+        }
         
         try {
             const response = await fetch(endpoint, {
@@ -123,7 +258,13 @@ document.addEventListener('DOMContentLoaded', () => {
                         if (data.chat_id && !receivedChatId) {
                             currentChatId = data.chat_id;
                             receivedChatId = true;
-                            window.history.pushState({}, '', `/chat/${currentChatId}`);
+                            
+                            if (!isTempMode) {
+                                window.history.pushState({}, '', `/chat/${currentChatId}`);
+                                if (endpoint === '/chat/new') {
+                                    addChatToSidebar(currentChatId, message); 
+                                }
+                            }
                         }
 
                         if (data.thinking) {
@@ -153,6 +294,25 @@ document.addEventListener('DOMContentLoaded', () => {
             sendButton.disabled = false;
             textarea.focus();
         }
+    }
+
+    function addChatToSidebar(cid, firstMessage) {
+        const chatList = document.querySelector('.chat-list');
+        if (!chatList) return;
+
+        document.querySelectorAll('.chat-item').forEach(el => el.classList.remove('active'));
+    
+        const newChatItem = document.createElement('a');
+        newChatItem.href = `/chat/${cid}`;
+        newChatItem.className = 'chat-item active';
+        newChatItem.setAttribute('data-cid', cid);
+    
+        newChatItem.innerHTML = `
+            <span class="chat-name">New Chat</span>
+            <button class="menu-dots" title="Chat Options">⋮</button>
+        `;
+    
+        chatList.prepend(newChatItem);
     }
 
     function appendMessage(role, text) {
@@ -232,7 +392,7 @@ async function updateModelStatuses() {
             }
         });
     } catch (err) {
-        console.error("Status check failed. Pulse backend might be busy.");
+        console.error("Status check failed. The backend might be busy.");
     }
 }
 
