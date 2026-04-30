@@ -10,7 +10,7 @@ RAG_MIN_SCORE = 0.4
 # May affect streaming speed:
 INSTANT_TOOL_EXEC: bool = False # Instantly execute the tool as soon it appears in the stream instead of collecting every tool call in the stream before execution.
 ENV_READ_PREFIX = '$'
-USERNAME = User
+USERNAME = "User"
 
 DEFAULT_PROMPT: str = r"""
 [Your default/fallback prompt for models.]
