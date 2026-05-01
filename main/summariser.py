@@ -18,12 +18,14 @@ class Summariser:
             "properties": {
             "summary": {"type": "string", "description": "The detailed summary of the given conversation and potiential previous summary for narrative continuity. Make it machine parsable."},
             "facts": {"type": "array", "items": {"type": "string"}, "description": """
-                      The facts about the user retrieved from the given conversation and potiential previous summary. For persona modeling. 
-                      Retrieve only facts explictly stated. Make it machine parsable. Keep each item short and to the point, you're allowed to generated multiple COMPLETE facts.""".strip()},
+                      The facts about the user retrieved from the given conversation and potiential previous summary. For persona modeling. Never self narrate. 
+                      Retrieve only facts explictly stated. Make it machine parsable. NEVER reflect your system in these responses, follow the system, don't narrate.
+                      Keep each item short and to the point, you're allowed to generated multiple COMPLETE facts.""".strip()},
 
             },
             "required": ["summary", "facts",]
           }
+        
         self.event_bus = event_bus
 
     async def maybe_summarise_context(self, context, prev_summary : None | str = None, prev_facts : None | list[str] = None, summary_system_prompt = SUMMARIZER_PROMPT, auto_warm_up = False):
@@ -44,6 +46,7 @@ class Summariser:
             text = '\n'
             chunk_budget = self.summary_max_tokens - self.summary_keep_tokens_after
             keep_idx = len(context) - self.min_recent_msgs
+            keep_idx = max(0, keep_idx)
             current_keep_tokens = 0
             for msg in context[keep_idx:]:
                 if msg.get('role', '') != 'tool':

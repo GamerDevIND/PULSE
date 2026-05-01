@@ -23,11 +23,13 @@ def sanitize_id(oid: str) -> str:
     return oid
 
 class RAG_manager:
-    def __init__(self, embedder: None | LocalEmbedder | RemoteEmbedder | OpenRouterEmbedder, embedder_auto_warm_up = True, db_path="./rag_db", table_name="memories"):
+    def __init__(self, embedder: None | LocalEmbedder | RemoteEmbedder | OpenRouterEmbedder, embedder_auto_warm_up = True, db_path="./rag_db", 
+                 table_name="memories", embed_chunk_size = 24):
         self.embedder = embedder
         self.db_path = db_path
         self.table_name = table_name
         self.embedder_auto_warm_up = embedder_auto_warm_up
+        self.embed_chunk_size = embed_chunk_size
         self.reranker = MRRReranker()
         self.cache = {}
         self.db = None
@@ -84,7 +86,7 @@ class RAG_manager:
             
         chunks = list(dict.fromkeys(c.strip() for c in chunks if c.strip()))
 
-        vectors = await embed(self.embedder, chunks, self.embedder_auto_warm_up)
+        vectors = await embed(self.embedder, chunks, self.embedder_auto_warm_up, self.embed_chunk_size)
 
         records = []
         for chunk_text, vec in zip(chunks, vectors):
@@ -120,9 +122,12 @@ class RAG_manager:
         if len(self.cache) > 1024:
             self.cache.clear()
 
+        def _helper_search(table:lancedb.Table, query:str, query_vec, reranker, top_k:int):
+            return table.search(query_type='hybrid').vector(query_vec).text(query).rerank(reranker).limit(top_k).to_list()
+
         query_vec = (await embed(self.embedder, [query], self.embedder_auto_warm_up))[0]
 
-        results = await asyncio.to_thread(self._helper_search, self.table, query, query_vec, self.reranker, top_k)
+        results = await asyncio.to_thread(_helper_search, self.table, query, query_vec, self.reranker, top_k)
 
         res = []
 
@@ -168,10 +173,66 @@ class RAG_manager:
             await asyncio.to_thread(shutil.rmtree, self.db_path)
 
         self.db = None
+    
+    async def search_metadata(self, metadata: str, limit: int = 10):
+        await self.load()
 
-    @staticmethod
-    def _helper_search(table:lancedb.Table, query:str, query_vec, reranker, top_k:int):
-        return table.search(query_type='hybrid').vector(query_vec).text(query).rerank(reranker).limit(top_k).to_list()
+        if not self.table: 
+            return []
+        
+
+        res = await asyncio.to_thread(
+            lambda: self.table.search().where(metadata).limit(limit).to_list() # type: ignore
+            
+        )
+        return self._format_results(res)
+    
+    async def search_by_metadata_value(self, key: str, value: str, limit: int = 10):
+        await self.load()
+        if not self.table: 
+            return []
+
+        filter_query = f"metadata LIKE '%\"{key}\": \"{value}\"%'"
+        
+        res = await asyncio.to_thread(
+            lambda: self.table.search().where(filter_query).limit(limit).to_list() # type: ignore
+        )
+        return self._format_results(res)
+    
+    async def filtered_search(self, query: str | None = None, metadata_filter: str | None = None, limit: int = 10):
+        await self.load()
+        if not self.table: 
+            return []
+
+        search_obj = self.table.search(query)
+        
+        if metadata_filter:
+            search_obj = search_obj.where(metadata_filter)
+            
+        res = await asyncio.to_thread(lambda: search_obj.limit(limit).to_list())
+        return self._format_results(res)
+        
+    async def text_search(self, query: str, limit: int = 10):
+        await self.load()
+
+        if not self.table: 
+            return []
+
+        res = await asyncio.to_thread(
+            lambda: self.table.search(query).limit(limit).to_list() # type: ignore
+        )
+        return self._format_results(res)
+    
+    def _format_results(self, raw_results):
+        return [
+            {
+                "id": r["id"],
+                "text": r["text"],
+                "metadata": json.loads(r.get("metadata", r"{}")),
+                "score": r.get("_score", None) 
+            }
+            for r in raw_results
+        ]
 
     async def list_memories(self, limit = 10, offset = 0):
         await self.load()
@@ -219,7 +280,7 @@ class RAG_manager:
             return False
         
         try:
-            new_vector = (await embed(self.embedder, [new_text], self.embedder_auto_warm_up))[0]
+            new_vector = (await embed(self.embedder, [new_text], self.embedder_auto_warm_up, self.embed_chunk_size))[0]
 
             await asyncio.to_thread(
                 self.table.update,

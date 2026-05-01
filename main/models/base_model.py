@@ -5,6 +5,12 @@ from main.tools import Tool
 import inspect
 from typing import Literal, Type
 from main.utils import log
+import os
+from io import BytesIO
+import base64
+import aiofiles
+import av
+from main.configs import IMAGE_EXTs, VIDEO_EXTs, ERROR_TOKEN
 
 class Model:
     def __init__(self, role, host, name: str, model_name: str, api_key:str | None, init_state, event_bus: None | EventBus = None, **kwargs) -> None:
@@ -18,9 +24,13 @@ class Model:
         self.warmed_up = False
         self.state_lock = asyncio.Lock()
         self.tools = []
+        self.has_video = False
+        self.has_audio = False
         self.state = init_state
         self.api_key = api_key
+        self.has_vision = kwargs.get('has_vision', False)
         self.port:int | None = None
+        self.input_handler = InputHandler()
         self.event_bus = event_bus
         self.details_cache = None
         self.resource_manager: ResourceManager | SessionManager = SessionManager(model_name)
@@ -114,3 +124,81 @@ class Model:
                 self.tools.append(tool.schema)
             else:
                 await log(f"No valid type dectected for: {tool}", 'warn')
+
+    def set_has_video(self, has_video:bool):
+        self.has_video = has_video
+
+    def set_has_audio(self, has_audio:bool):
+        self.has_audio = has_audio
+
+    
+
+class InputHandler:
+    def __init__(self) -> None:
+        pass
+
+    def is_url(self, url:str):
+        url = url.lower()
+        return url.startswith('http://') or url.startswith('https://') or url.startswith('www.')
+    
+    async def encode_frames_from_vid(self, video_path, url_valid = False, mod_ = 1, format_ = "JPEG", max_video_size_mbs = 5):
+        if url_valid:
+            if self.is_url(video_path):
+                return [video_path], None
+        
+        ext = os.path.splitext(video_path)[1].lower()
+        if ext not in VIDEO_EXTs:
+            await log(f"{video_path} has file extenstion {ext} which isn't supported for video input", 'error')
+            return ERROR_TOKEN, f"{video_path} has file extenstion {ext} which isn't supported for video input"
+        
+        if await asyncio.to_thread(os.path.getsize, video_path) / 1024**2 <= max_video_size_mbs:
+            async with aiofiles.open(video_path, "rb") as video_file:
+                return base64.b64encode(await video_file.read()).decode('utf-8'), None
+        
+        await log("Audio processing hasn't been implemented yet.", 'warn')
+        def _helper():
+            container = av.open(video_path)
+            frames = []
+            video_stream = next((s for s in container.streams if s.type == 'video'), None)
+            if not video_stream:
+                raise ValueError("No video stream found in the file.")
+            for i, frame in enumerate(container.decode(video_stream)): # type: ignore
+                if i % mod_ == 0:
+                    img = frame.to_image() # type: ignore
+                    buffer = BytesIO()
+                    img.save(buffer, format=format_)
+                    frame_b64 = base64.b64encode(buffer.getvalue()).decode("utf-8")
+                    frames.append(frame_b64)
+            return frames, None
+            
+        return await asyncio.to_thread(_helper)
+    
+    async def encode_image(self, image_path, url_valid = False):
+        if url_valid:
+            if self.is_url(image_path):
+                return image_path, None
+            
+        ext = os.path.splitext(image_path)[1].lower()
+        if ext not in IMAGE_EXTs:
+            await log(f"{image_path} has file extenstion {ext} which isn't supported for image input", 'error')
+            return ERROR_TOKEN, f"{image_path} has file extenstion {ext} which isn't supported for image input"
+        try:
+            async with aiofiles.open(image_path, "rb") as image_file:
+                image_data = await image_file.read()
+            base64_image = base64.b64encode(image_data).decode("utf-8")
+            return base64_image, None
+        except Exception as e:
+            return ERROR_TOKEN, repr(e)
+        
+    async def encode_audio(self, audio_path, url_valid = False):
+        if url_valid:
+            if self.is_url(audio_path):
+                return audio_path, None
+            
+        try:
+            async with aiofiles.open(audio_path, "rb") as f:
+                audio_data = await f.read()
+                base64_audio = base64.b64encode(audio_data).decode("utf-8")
+                return base64_audio, None
+        except Exception as e:
+            return ERROR_TOKEN, repr(e)

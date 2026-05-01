@@ -1,14 +1,10 @@
 import os
 import asyncio
 import aiohttp
-import aiofiles
-import av
 import json
 from main.utils import log, strip_thinking
-from main.configs import IMAGE_EXTs, VIDEO_EXTs, ERROR_TOKEN
+from main.configs import IMAGE_EXTs, VIDEO_EXTs, AUDIO_EXTs, ERROR_TOKEN
 from main.events import EventBus
-import base64
-from io import BytesIO
 from .base_model import Model
 import sys
 if sys.platform != 'win32':
@@ -32,13 +28,13 @@ class OllamaModel(Model):
         self.has_CoT = has_CoT
         self.has_vision = has_vision
         self.system = system_prompt
-        self.has_video = False
         self.generation_cancelled = False
 
     def _get_endpoint(self) -> str:
         return "/api/chat"
 
     async def get_model_details(self):
+        if self.details_cache: return self.details_cache
         url = f"{self.host}/api/show"
         data = {
             "model": self.model_name
@@ -56,49 +52,22 @@ class OllamaModel(Model):
             res = await resp.json()
 
         return await self._get_model_details_helper(res)
-
+    
     async def _encode_frames_from_vid(self, video_path, mod_ = 1, format_ = "JPEG"):
         if not self.has_vision:
             return [], None
-        ext = os.path.splitext(video_path)[1].lower()
-        if ext not in VIDEO_EXTs:
-            await log(f"{video_path} has file extenstion {ext} which isn't supported for video input", 'error')
-            return ERROR_TOKEN, f"{video_path} has file extenstion {ext} which isn't supported for video input"
-
         try:
-            await log("Audio processing hasn't been implemented yet.", 'warn')
-            def _helper():
-                container = av.open(video_path)
-                frames = []
-                video_stream = next((s for s in container.streams if s.type == 'video'), None)
-                if not video_stream:
-                    raise ValueError("No video stream found in the file.")
-                for i, frame in enumerate(container.decode(video_stream)): # type: ignore
-                    if i % mod_ == 0:
-                        img = frame.to_image() # type: ignore
-                        buffer = BytesIO()
-                        img.save(buffer, format=format_)
-                        frame_b64 = base64.b64encode(buffer.getvalue()).decode("utf-8")
-                        frames.append(frame_b64)
-                return frames, None
-            
-            return await asyncio.to_thread(_helper)
+            return await self.input_handler.encode_frames_from_vid(video_path, False, mod_, format_, 5)
         except Exception as e:
             await log(f"Error in video frame encoding for {self.name}: {e}", 'error')
             return ERROR_TOKEN, repr(e)
-
+    
     async def _encode_image(self, image_path):
-        ext = os.path.splitext(image_path)[1].lower()
-        if ext not in IMAGE_EXTs:
-            await log(f"{image_path} has file extenstion {ext} which isn't supported for image input", 'error')
-            return ERROR_TOKEN, f"{image_path} has file extenstion {ext} which isn't supported for image input"
-        try:
-            async with aiofiles.open(image_path, "rb") as image_file:
-                image_data = await image_file.read()
-            base64_image = base64.b64encode(image_data).decode("utf-8")
-            return base64_image, None
-        except Exception as e:
-            return ERROR_TOKEN, repr(e)
+        return await self.input_handler.encode_image(image_path, False)
+    
+    async def _encode_audio(self, audio_path):
+        return await self.input_handler.encode_audio(audio_path, False)
+
 
     def cancel_global(self):
         self.generation_cancelled = True
@@ -145,27 +114,35 @@ class OllamaModel(Model):
             if ext in IMAGE_EXTs:
                 image, e = await self._encode_image(image_path=file_path)
                 if image == ERROR_TOKEN:
-                    await log(f"Error encoding image!: {repr(e)}", 'error')
-                    yield (ERROR_TOKEN, ERROR_TOKEN, [])
-                    return
+                    await log(f"Error encoding image! Skipping: {repr(e)}", 'error')
                 else:
                     data['messages'][-1]['images'] = [image]
             elif ext in VIDEO_EXTs and self.has_video:
                 frames, e = await self._encode_frames_from_vid(video_path=file_path, mod_= mod_, format_=video_save_buffer_format)
                 if frames == ERROR_TOKEN:
-                    await log(f"Error encoding video!: {repr(e)}", 'error')
-                    yield (ERROR_TOKEN, ERROR_TOKEN, [])
-                    return
+                    await log(f"Error encoding video! Skipping: {repr(e)}", 'error')
                 else:
                     data['messages'][-1]['images'] = frames
             elif ext in VIDEO_EXTs and not self.has_video:
                 await log(f"Cannot process video file {file_path}: Model {self.name} is not configured for video processing.", 'warn')
+                
+        if self.has_audio and file_path is not None:
+            ext = os.path.splitext(file_path)[1].lower()
+            if ext in AUDIO_EXTs:
+                audio, e = await self._encode_audio(audio_path=file_path)
+
+                if audio  == ERROR_TOKEN:
+                    await log(f"Error encoding Audio! Skipping: {repr(e)}", 'error')
+                else:
+                    current_images = data['messages'][-1].get('images', [])
+                    current_images.append(audio)
+                    data['messages'][-1]['images'] = current_images
+
+        if not self.resource_manager.session: raise
 
         await self.change_state(BUSY)
 
         buffer = ""
-
-        if not self.resource_manager.session: raise
 
         if self.event_bus: await self.event_bus.parallel_emit(self.event_bus.INFO, msg = "Generating response...")
 
@@ -220,7 +197,7 @@ class OllamaModel(Model):
                         thinking = res_json.get("message", {}).get("thinking", "")
                         content = res_json.get("message", {}).get("content", "")
                         tools = res_json.get("message", {}).get("tool_calls", [])
-                        if not thinking.strip():
+                        if not (thinking or thinking.strip()):
                             c, t = strip_thinking(content)
                             if c:
                                 content = c
@@ -386,6 +363,7 @@ class OllamaEmbedder(Model):
         self.host =  f"http://localhost:{self.port}"
 
     async def get_model_details(self):
+        if self.details_cache: return self.details_cache
         url = f"{self.host}/api/show"
         data = {
             "model": self.model_name

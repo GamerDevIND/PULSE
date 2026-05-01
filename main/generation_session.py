@@ -82,7 +82,7 @@ class GenerationSession:
             async def producer():
                 try:
                     async for (thinking_chunk, content_chunk, tools_chunk) in self.model.generate(query, context, True,
-                                                                                                        think=think, image_path=image_path, mod_ = mod_, 
+                                                                                                        think=think, file_path=image_path, mod_ = mod_, 
                                                                                                         system_prompt_override=self.sys_override, options=self.options,
                                                                                                         format_=self.format,  tools_override=self.tools_override):
 
@@ -130,7 +130,7 @@ class GenerationSession:
 
         else:
            async for (thinking_chunk, content_chunk, tools_chunk) in self.model.generate(query, context, False,
-                                                                                                        think=think, image_path=image_path, mod_ = mod_, 
+                                                                                                        think=think, file_path=image_path, mod_ = mod_, 
                                                                                                         system_prompt_override=self.sys_override, options=self.options,
                                                                                                         format_=self.format,  tools_override=self.tools_override):
 

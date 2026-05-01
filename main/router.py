@@ -94,8 +94,9 @@ class Router:
             roles.append('chaos')
 
         for role in roles:
-            if query.strip().startswith(f"{self.manual_prefix}{role}"):
-                return query[len(f"{self.manual_prefix}{role}"):].strip(), role
+            prefix = f"{self.manual_prefix}{role} "
+            if query.strip().startswith(prefix):
+                return query.removeprefix(prefix).strip(), role
             
         await log(f"No or incorrect prefix, using default '{self.fallback_role}'", "info")
               

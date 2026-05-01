@@ -304,6 +304,7 @@ class Conversation:
             self.messages.extend(items)
 
     async def get_context(self):
+        await self.flush_queue()
         async with self.lock:
             context = deepcopy(list(self.messages))
             return context

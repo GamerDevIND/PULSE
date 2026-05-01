@@ -2,6 +2,7 @@ STREAM_DISABLED= ["discord", "cli-no-stream", 'web-no-stream',]
 
 IMAGE_EXTs = ['.png', '.jpg', '.jpeg', ]
 VIDEO_EXTs =  ['.mp4', '.mov', '.avi', ]
+AUDIO_EXTs = ['.wav', '.mp3']
 
 ERROR_TOKEN = "ERROR_TOKEN"
 FILE_NAME_KEY = 'file_path'

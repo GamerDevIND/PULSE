@@ -29,7 +29,7 @@ def chunk(text:str, limit=700, overlap_size= 1) -> list[str]:
     buffer = []
 
     for u in unit:
-        if estimate_tokens(text) > limit:
+        if estimate_tokens(u) > limit:
             if buffer:
                 chunks.append('\n\n'.join(buffer))
                 buffer = []

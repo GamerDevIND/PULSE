@@ -31,9 +31,8 @@ from .configs import (
 class AI:
     def __init__(self, model_config_path="main/Models_config.json", context_dir="main/saves/", 
                  mode:Literal['single'] | Literal['multi'] | Literal['openrouter'] = "multi" , max_turns = 5,  absolute_max_turns = 50, use_RAG = True, memory_db_path = "./RAG_DB",
-                   table_name = 'memories', summary_max_tokens = 4000, keep_tokens_after_summary = 2000, 
-                 min_recent_turns = 3, cache_folder = './cache', 
-                 gc_time_limit = 259200, gc_limit_size_MBs = 50, gc_interval = 1800, embedder_auto_warm_up = True, max_memory_rag_chars = 1000):
+                   table_name = 'memories', summary_max_tokens = 4000, keep_tokens_after_summary = 2000, min_recent_turns = 3, cache_folder = './cache', 
+                  gc_time_limit = 259200, gc_limit_size_MBs = 50, gc_interval = 1800, embedder_auto_warm_up = True, max_memory_rag_chars = 1000, embed_chunk_size = 32):
         self.model_config_path = model_config_path
         self.context_dir = context_dir
         self.system_prompts = {
@@ -72,7 +71,7 @@ class AI:
         self.tools_regis = ToolRegistry()
         if self.use_RAG:
             from .RAG.manager import RAG_manager
-            self.RAG_Manager = RAG_manager(None, embedder_auto_warm_up, memory_db_path, table_name)
+            self.RAG_Manager = RAG_manager(None, embedder_auto_warm_up, memory_db_path, table_name, embed_chunk_size)
         else:
             self.RAG_Manager = None
 
