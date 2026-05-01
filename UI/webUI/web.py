@@ -14,7 +14,7 @@ from main.utils import log, estimate_tokens
 from main.configs import USERNAME, DEFAULT_PROMPT, CHAOS_PROMPT, RAG_MIN_SCORE
 
 app = Quart(__name__)
-ai = AI("main/openrouter_models_configs.json", mode='openrouter', use_RAG=False)
+ai = AI("main/Models_configs.json", mode='openrouter', use_RAG=False)
 
 def get_greeting():
     random.seed(random.randint(-10000, 10000))
