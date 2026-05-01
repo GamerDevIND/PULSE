@@ -203,7 +203,7 @@ A new mode has also been added. OpenRouter models can be used by setting the `mo
 
 - Voice I/O
 
-- Vision (Image added. Video added. Audio is under consideration. Please stand by.)
+- Vision (Image added. Video added. Audio is partially implemented, expect inconsistencies and bugs. Please stand by.)
 
 - Agentic mode (because why the hell not / WIP *expected* full drop: v1.5.x)
 

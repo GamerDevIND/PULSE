@@ -160,7 +160,7 @@ Then the AI class will handle them like little smart minions slaves
 - **CRUD for Memories:** You can now list, update, and delete the shit the AI remembers. Total control, finally.
 - - **Experimental WebUI and multi conversation support**: I've added an experimental WebUI using [`Quart`](https://pypi.org/project/Quart/) and multiple conversation support. BECAUSE THE CLI IS TOO BORING!!!!
 
-- Event Bus prototype because of course
+- Event Bus prototype because ofcourse 
   
 ---
 
@@ -189,7 +189,7 @@ A new mode has also been added. OpenRouter models can be used by setting the `mo
 
 - Voice I/O
 
-- Vision (Image added. Video added. Audio is under consideration. Please stand by.)
+- Vision (Image added. Video added. Audio is partially implemented, expect inconsistencies and bugs. Please stand by.)
 
 - Agentic mode (because why the hell not / WIP please don't contact emergency services those screams AREN'T MINE.)
 
