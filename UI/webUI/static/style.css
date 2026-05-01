@@ -614,7 +614,6 @@ textarea {
 
 .settings_icon {
     position: fixed;
-    /* Fix to viewport */
     top: 20px;
     right: 20px;
     background: #363636;
