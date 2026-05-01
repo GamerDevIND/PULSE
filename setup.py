@@ -45,7 +45,7 @@ async def setup():
             
             try:
                 for model in models:
-                    name = model.get("ollama_name")
+                    name = model.get("model_name")
                     if name:
                         print(f"Pulling {name}...")
                         subprocess.run(["ollama", "pull", name], check=True)
