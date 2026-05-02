@@ -33,7 +33,7 @@ class Router:
             "required": ["role"]
           }
 
-    async def route_query(self, query: str, context, manual: bool | None, include_chaos = True):
+    async def route_query(self, query: str | None, context, manual: bool | None, include_chaos = True):
         if not manual:
             if not self.model:
                 await log("Router model not configured. Using default.", "error")
@@ -64,7 +64,7 @@ class Router:
                 await log(f"Exception during routing: {e}", "error")
                 return query, self.fallback_role
 
-            router_resp_raw = "".join(router_resp_parts).strip()
+            router_resp_raw = "".join([str(p) for p in router_resp_parts if p is not None]).strip()
             selected_role = None
 
             await log(f"Router raw response: {router_resp_raw}", "info")
@@ -85,7 +85,11 @@ class Router:
        
                 return query, self.fallback_role
         else:
-            return await self.parse_query(query, include_chaos)
+            if query:
+                return await self.parse_query(query, include_chaos)
+            else:
+                await log("No query provided, defaulting...", 'warn')
+                return query, self.fallback_role
 
     async def parse_query(self, query:str, include_chaos = True): # i might add automatic role parsing later
 
@@ -95,7 +99,7 @@ class Router:
 
         for role in roles:
             prefix = f"{self.manual_prefix}{role} "
-            if query.strip().startswith(prefix):
+            if query and query.strip().startswith(prefix):
                 query = query.removeprefix(prefix)
                 return query.strip(), role
             

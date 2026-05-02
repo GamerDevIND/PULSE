@@ -77,7 +77,7 @@ class OpenRouterModel(Model):
     async def _encode_audio(self, audio_path):
         return await self.input_handler.encode_audio(audio_path, self.url_media_valid)
 
-    async def get_multimodal_data(self, data, query, file_path, mod_, video_save_buffer_format):
+    async def get_multimodal_data(self, data, query:str | None, file_path, mod_, video_save_buffer_format):
         data = data.copy()
         if query and query.strip(): 
             if self.has_vision and file_path is not None:
@@ -180,7 +180,7 @@ class OpenRouterModel(Model):
         await self.change_state(DOWN)
         if self.event_bus: await self.event_bus.parallel_emit(self.event_bus.INFO, msg = f"Model shutdown: {self.name} ({self.model_name})")
 
-    async def generate(self, query: str, context: list[dict], stream: bool, think: str | bool | None = False, file_path: None | str = None, 
+    async def generate(self, query: str | None, context: list[dict], stream: bool, think: str | bool | None = False, file_path: None | str = None, 
                    mod_ = 1, video_save_buffer_format = "JPEG", system_prompt_override: str | None = None, options : dict | None = None, format_: dict | None = None, tools_override:None|list = None):
         
         if not self.api_key:
@@ -289,7 +289,7 @@ class OpenRouterModel(Model):
                         content = message.get('content', "")
                         tools = message.get("tool_calls", message.get('tools',[]))
 
-                        if not (thinking or thinking.strip()):
+                        if not (thinking and thinking.strip()):
                             c, t = strip_thinking(content)
                             if c:
                                 content = c
@@ -312,7 +312,8 @@ class OpenRouterModel(Model):
             return
 
         except Exception as e:
-            await log(f"Openrouter API Request Error: {e}", "error")
+            # await log(f"Openrouter API Request Error: {e}", "error")
+            raise e
             if self.event_bus: await self.event_bus.parallel_emit(self.event_bus.ERROR, msg = f"Openrouter API Request Error: {e}")
             yield (ERROR_TOKEN, ERROR_TOKEN, [])
             

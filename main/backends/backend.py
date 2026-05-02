@@ -136,7 +136,7 @@ class Backend:
 
             await asyncio.sleep(10)
 
-    async def create_session(self, query:str, context:list[dict], tools_regis:ToolRegistry, role, system_prompt_override: str | None = None, 
+    async def create_session(self, query:str | None, context:list[dict], tools_regis:ToolRegistry, role, system_prompt_override: str | None = None, 
                 options: dict | None = None, format_: dict | None = None, max_turns = 10, abs_max_turns = 50, regen_consent_callback= None, temp_remove_tool_name = None):
         
         if role == EMBEDDING_MODEL_ROLE:

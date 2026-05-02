@@ -106,7 +106,7 @@ class OllamaModel(Model):
 
         return data
 
-    async def _generator(self, query: str, context: list[dict], stream: bool, think: str | bool | None = False, file_path: None | str = None, 
+    async def _generator(self, query: str | None, context: list[dict], stream: bool, think: str | bool | None = False, file_path: None | str = None, 
                    mod_ = 10, video_save_buffer_format = "JPEG", system_prompt_override: str | None = None, options : dict | None = None, format_: dict | None = None, tools_override:None|list = None):
         
         endpoint = self._get_endpoint()
@@ -194,7 +194,7 @@ class OllamaModel(Model):
                         thinking = res_json.get("message", {}).get("thinking", "")
                         content = res_json.get("message", {}).get("content", "")
                         tools = res_json.get("message", {}).get("tool_calls", [])
-                        if not (thinking or thinking.strip()):
+                        if not (thinking and thinking.strip()):
                             c, t = strip_thinking(content)
                             if c:
                                 content = c

@@ -21,7 +21,7 @@ GENERATING = "GENERATING"
 CANCELLING = "CANCELLING"
 
 class GenerationSession:
-    def __init__(self, query:str, context:list[dict], tools_regis:ToolRegistry, model: LocalModel | RemoteModel, system_prompt_override: str | None = None, 
+    def __init__(self, query:str | None, context:list[dict], tools_regis:ToolRegistry, model: LocalModel | RemoteModel, system_prompt_override: str | None = None, 
                 options: dict | None = None, format_: dict | None = None, max_turns = 10, abs_max_turns = 50, regen_consent_callback= None, tools_override=None, event_bus: None | EventBus = None,) -> None:
         self.query = query
         self.original_context = context

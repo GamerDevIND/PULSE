@@ -54,7 +54,7 @@ class LocalModel(OllamaModel):
         await self._warmer(use_mmap, warmup_image_path, use_custom_keep_alive_timeout, custom_keep_alive_timeout,
                            has_video_processing, warmup_video_path)
 
-    async def generate(self, query: str, context: list[dict], stream: bool, think: str | bool | None = False, file_path: None | str = None, 
+    async def generate(self, query: str | None, context: list[dict], stream: bool, think: str | bool | None = False, file_path: None | str = None, 
                    mod_ = 10, system_prompt_override: str | None = None, options:dict | None = None, format_: dict | None = None, tools_override:None | list = None):
 
         await self.change_state(BUSY) 

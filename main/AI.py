@@ -248,7 +248,7 @@ class AI:
         else:
             return False
     
-    async def get_prompted_query(self, context:list, summary, facts, use_memory = True, query=""):
+    async def get_prompted_query(self, context:list, summary, facts, use_memory = True, query:str | None = ""):
 
         '''
         USE THIS METHOD UNDER A LOCK FOR CONCURRENCY SAFETY!
@@ -285,7 +285,7 @@ class AI:
                 self.status = {"status": "Retrieving memory...", "message": ""}
         
             await self.event_bus.parallel_emit(self.event_bus.RETRIEVING_MEMORY, query = query)
-            rag_results = await self.RAG_Manager.retrieve(query, min_score=RAG_MIN_SCORE)
+            rag_results = await self.RAG_Manager.retrieve(query, min_score=RAG_MIN_SCORE) if query else []
 
             if rag_results:
                 scores = [r["score"] for r in rag_results]

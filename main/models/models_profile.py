@@ -21,7 +21,7 @@ class RemoteModel(OllamaModel):
         if self.warmed_up:
             await self.change_state(IDLE)
 
-    async def generate(self, query: str, context: list[dict], stream: bool, think: str | bool | None = False, file_path: None | str = None, 
+    async def generate(self, query: str | None, context: list[dict], stream: bool, think: str | bool | None = False, file_path: None | str = None, 
                    mod_ = 10, system_prompt_override: str | None = None, options: dict | None = None, format_: dict | None = None,  tools_override:None | list = None):
         await log(f"Generating response from {self.name}...", "info")
         await self.change_state(BUSY)
