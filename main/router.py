@@ -85,18 +85,19 @@ class Router:
        
                 return query, self.fallback_role
         else:
-            return await self.parse_query(query)
+            return await self.parse_query(query, include_chaos)
 
     async def parse_query(self, query:str, include_chaos = True): # i might add automatic role parsing later
 
-        roles = list(map(lambda x: x.strip(), self.available_roles))
+        roles = list(map(lambda x: x.strip() if x else "", self.available_roles))
         if not 'chaos' in roles and include_chaos:
             roles.append('chaos')
 
         for role in roles:
             prefix = f"{self.manual_prefix}{role} "
             if query.strip().startswith(prefix):
-                return query.removeprefix(prefix).strip(), role
+                query = query.removeprefix(prefix)
+                return query.strip(), role
             
         await log(f"No or incorrect prefix, using default '{self.fallback_role}'", "info")
               
