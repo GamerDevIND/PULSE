@@ -77,53 +77,8 @@ class OpenRouterModel(Model):
     async def _encode_audio(self, audio_path):
         return await self.input_handler.encode_audio(audio_path, self.url_media_valid)
 
-
-    async def shutdown(self):
-        if self.state == DOWN: return
-        if self.event_bus: await self.event_bus.parallel_emit(self.event_bus.INFO, msg = f"Shutting down model: {self.name} ({self.model_name})")
-        await self.resource_manager.shutdown(send_shutdown_paylod=False)
-        await self.change_state(DOWN)
-        if self.event_bus: await self.event_bus.parallel_emit(self.event_bus.INFO, msg = f"Model shutdown: {self.name} ({self.model_name})")
-
-    async def generate(self, query: str, context: list[dict], stream: bool, think: str | bool | None = False, file_path: None | str = None, 
-                   mod_ = 1, video_save_buffer_format = "JPEG", system_prompt_override: str | None = None, options : dict | None = None, format_: dict | None = None, tools_override:None|list = None):
-        
-        if not self.api_key:
-            raise ValueError
-
-        messages = []
-        if system_prompt_override is None:
-            if self.system:
-                messages.append({'role': "system", 'content': self.system})
-        else:
-            messages.append({'role': "system", 'content': system_prompt_override})
-
-        if query and query.strip(): messages += context + [{"role": "user", "content": query}]
-
-        headers = {
-            "Content-Type": "application/json",
-            "Authorization": f"Bearer {self.api_key}",
-        }
-
-        data = {
-            "model": self.model_name,
-            "messages": messages,
-            "stream": stream,
-        }
-
-        if self.has_tools and (self.tools or tools_override):
-            data["tools"] = tools_override if tools_override else self.tools
-
-        if format_:
-            format_ = deepcopy(format_)
-            format_["additionalProperties"] = False
-            data["response_format"] = {
-                "type": "json_schema",
-                "name": "format",
-                "strict": True,
-                "schema": format_
-            }
-            
+    async def get_multimodal_data(self, data, query, file_path, mod_, video_save_buffer_format):
+        data = data.copy()
         if query and query.strip(): 
             if self.has_vision and file_path is not None:
                 ext = os.path.splitext(file_path)[1].lower()
@@ -200,28 +155,60 @@ class OpenRouterModel(Model):
                     if audio  == ERROR_TOKEN:
                         await log(f"Error encoding Audio! Skipping: {repr(e)}", 'error')
                     else:
-                        msgs = {
+                        d = data['messages'][-1]['content'] 
+
+                        if not {'type': 'text', "text": query} in d:
+                            d.append({
+                                'type': 'text',
+                                "text": query
+                            })
+                            
+                        d.append({
                             "type": "input_audio",
                             "input_audio": {
                                 "data": audio,
                                 "format": f"{ext.removeprefix('.')}"
                             }
-                        }
-                        d = data['messages'][-1]['content']
+                        })
 
-                        if not {'type': 'text', "text": query} in d:
-                            d.append({
-                                        'type': 'text',
-                                        "text": query
-                                    })
-                            
-                        d.append({
-                                        "type": "input_audio",
-                                        "input_audio": {
-                                            "data": audio,
-                                            "format": f"{ext.removeprefix('.')}"
-                                        }
-                                    })
+        return data
+
+    async def shutdown(self):
+        if self.state == DOWN: return
+        if self.event_bus: await self.event_bus.parallel_emit(self.event_bus.INFO, msg = f"Shutting down model: {self.name} ({self.model_name})")
+        await self.resource_manager.shutdown(send_shutdown_paylod=False)
+        await self.change_state(DOWN)
+        if self.event_bus: await self.event_bus.parallel_emit(self.event_bus.INFO, msg = f"Model shutdown: {self.name} ({self.model_name})")
+
+    async def generate(self, query: str, context: list[dict], stream: bool, think: str | bool | None = False, file_path: None | str = None, 
+                   mod_ = 1, video_save_buffer_format = "JPEG", system_prompt_override: str | None = None, options : dict | None = None, format_: dict | None = None, tools_override:None|list = None):
+        
+        if not self.api_key:
+            raise ValueError
+        
+        headers = {
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {self.api_key}",
+        }
+
+        tools = None
+
+        if self.has_tools and (self.tools or tools_override):
+            tools = tools_override if tools_override else self.tools
+
+        data = self.build_payload(query, context, stream, self.system, system_prompt_override, tools)
+
+        if format_:
+            format_ = deepcopy(format_)
+            format_["additionalProperties"] = False
+            data["response_format"] = {
+                "type": "json_schema",
+                "name": "format",
+                "strict": True,
+                "schema": format_
+            }
+            
+        data = await self.get_multimodal_data(data, query, file_path, mod_, video_save_buffer_format)
 
         if not self.resource_manager.session: self.resource_manager.create_session()
 
@@ -251,7 +238,8 @@ class OpenRouterModel(Model):
 
                             while "\n" in buffer and (not self.resource_manager.session.closed):
                                 line, buffer = buffer.split("\n", 1)
-                                line = line.strip()
+                                if line:
+                                    line = line.strip()
 
                                 if line.startswith('data: '):
                                     line = line[6:]

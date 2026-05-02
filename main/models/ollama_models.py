@@ -72,42 +72,8 @@ class OllamaModel(Model):
     def cancel_global(self):
         self.generation_cancelled = True
 
-    async def _generator(self, query: str, context: list[dict], stream: bool, think: str | bool | None = False, file_path: None | str = None, 
-                   mod_ = 10, video_save_buffer_format = "JPEG", system_prompt_override: str | None = None, options : dict | None = None, format_: dict | None = None, tools_override:None|list = None):
-        
-        endpoint = self._get_endpoint()
-        url = f"{self.host}{endpoint}"
-
-        messages = []
-        if system_prompt_override is None:
-            if self.system:
-                messages.append({'role': "system", 'content': self.system})
-        else:
-            messages.append({'role': "system", 'content': system_prompt_override})
-
-        if query and query.strip(): messages += context + [{"role": "user", "content": query}]
-
-        headers = {"Content-Type": "application/json"}
-
-        if self.api_key: headers['Authorization'] = f'Bearer {self.api_key}'
-
-        data = {
-            "model": self.model_name,
-            "messages": messages,
-            "stream": stream
-        }
-
-        if self.has_tools and (self.tools or tools_override):
-            data["tools"] = tools_override if tools_override else self.tools
-
-        if options:
-            data["options"] = options
-
-        if format_:
-            data["format"] = format_
-
-        if self.has_CoT and think is not None:
-            data['think'] = think
+    async def get_multimodal_data(self, data, file_path, mod_, video_save_buffer_format):
+        data = data.copy()
 
         if self.has_vision and file_path is not None:
             ext = os.path.splitext(file_path)[1].lower()
@@ -137,6 +103,37 @@ class OllamaModel(Model):
                     current_images = data['messages'][-1].get('images', [])
                     current_images.append(audio)
                     data['messages'][-1]['images'] = current_images
+
+        return data
+
+    async def _generator(self, query: str, context: list[dict], stream: bool, think: str | bool | None = False, file_path: None | str = None, 
+                   mod_ = 10, video_save_buffer_format = "JPEG", system_prompt_override: str | None = None, options : dict | None = None, format_: dict | None = None, tools_override:None|list = None):
+        
+        endpoint = self._get_endpoint()
+        url = f"{self.host}{endpoint}"
+
+        headers = {
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {self.api_key}",
+        }
+
+        tools = None
+
+        if self.has_tools and (self.tools or tools_override):
+            tools = tools_override if tools_override else self.tools
+
+        data = self.build_payload(query, context, stream, self.system, system_prompt_override, tools)
+
+        if options:
+            data["options"] = options
+
+        if format_:
+            data["format"] = format_
+
+        if self.has_CoT and think is not None:
+            data['think'] = think
+
+        data = await self.get_multimodal_data(data, file_path, mod_, video_save_buffer_format)
 
         if not self.resource_manager.session: raise
 
@@ -381,7 +378,6 @@ class OllamaEmbedder(Model):
             res = await resp.json()
 
         return await self._get_model_details_helper(res, "embedding", False)
-
     
     async def embed(self, input_:str | list[str] | tuple[str]):
         if isinstance(input_, tuple):

@@ -70,6 +70,27 @@ class Model:
         else:
             self.state = new
 
+    def build_payload(self, query, context, stream, system, system_prompt_override, tools = None):
+        messages = []
+        if system_prompt_override is None:
+            if system:
+                messages.append({'role': "system", 'content': system})
+        else:
+            messages.append({'role': "system", 'content': system_prompt_override})
+
+        if query and query.strip(): messages += context + [{"role": "user", "content": query}]
+
+        data = {
+            "model": self.model_name,
+            "messages": messages,
+            "stream": stream,
+        }
+
+        if tools:
+            data["tools"] = tools
+
+        return data
+
     async def _get_model_details_helper(self, res:dict, default_capability = "completion", auto_add_completion = True):
         capabilities:list = res.get("capabilities", [default_capability])
         inp = res.get("input_modalities", [])
