@@ -169,11 +169,12 @@ document.addEventListener('DOMContentLoaded', () => {
 
     async function sendMessage() {
         const message = textarea.value.trim();
-        if (!message || isWaitingForResponse) return;
+        if (isWaitingForResponse) return;
 
         if (greetingContainer) greetingContainer.style.display = 'none';
 
-        appendMessage("user", message);
+        if (message.trim()) appendMessage("user", message);
+
         textarea.value = '';
         textarea.style.height = 'auto';
         isWaitingForResponse = true;
@@ -199,13 +200,17 @@ document.addEventListener('DOMContentLoaded', () => {
             let currentThinking = "";
             let currentContent = "";
             let receivedChatId = false;
+            let buffer = "";
 
             while (true) {
                 const { value, done } = await reader.read();
                 if (done) break;
                 
                 const chunk = decoder.decode(value);
-                const lines = chunk.split('\n');
+                buffer += chunk
+                const lines = buffer.split('\n');
+
+                buffer = lines.pop();
                 
                 for (const line of lines) {
                     if (!line) continue;
@@ -233,8 +238,34 @@ document.addEventListener('DOMContentLoaded', () => {
                             contentArea.innerHTML = currentContent.replace(/\n/g, '<br>');
                         }
                         chatDisplay.scrollTop = chatDisplay.scrollHeight;
-                    } catch (e) {}
+                    } catch (e) {console.error(e)}
                 }
+            }
+            if (buffer.trim()) {
+                try {
+                    const data = JSON.parse(buffer);
+                    if (data.chat_id && !receivedChatId) {
+                        currentChatId = data.chat_id;
+                        receivedChatId = true;
+                        if (!isTempMode) {
+                            window.history.pushState({}, '', `/chat/${currentChatId}`);
+                            if (endpoint === '/chat/new') addChatToSidebar(currentChatId);
+                        }
+                    }
+
+                    if (data.thinking) {
+                        if (thinkingWrapper) thinkingWrapper.style.display = 'block';
+                        currentThinking += data.thinking;
+                        if (thinkingArea) thinkingArea.innerHTML = currentThinking.replace(/\n/g, '<br>');
+                    }
+
+                    if (data.content) {
+                        if (contentArea.innerText === "Generating...") contentArea.innerText = "";
+                        currentContent += data.content;
+                        contentArea.innerHTML = currentContent.replace(/\n/g, '<br>');
+                    }
+                    chatDisplay.scrollTop = chatDisplay.scrollHeight;
+                } catch (e) {}
             }
         } catch (error) {
             appendMessage("assistant", "System Error: Failed to connect...");
@@ -299,6 +330,114 @@ document.addEventListener('click', (e) => {
     }
 });
 
+class ToastSystem {
+    constructor() {
+        this.container = document.getElementById('toast-container');
+        this.queue = [];
+        this.isProcessing = false;
+        this.MAX_VISIBLE_TOASTS = 3;
+        this.SPAM_THRESHOLD = 400; // in ms
+
+        this.eventMap = {
+            "error": "error",
+            "summarisation failed": "error",
+            "warn": "warn",
+            "success": "success",
+            "initialised": "success",
+            "session created": "success",
+        };
+    }
+
+    show(eventConst, customMsg = null, typeOverride = null) {
+        this.queue.push({ eventConst, customMsg, typeOverride });
+        this.processQueue();
+    }
+
+    async processQueue() {
+        if (this.isProcessing || this.queue.length === 0) return;
+        this.isProcessing = true;
+
+        while (this.queue.length > 0) {
+            const { eventConst, customMsg, typeOverride } = this.queue.shift();
+            
+            if (this.queue.length > 10 && !typeOverride && !["error", "warn"].includes(this.eventMap[eventConst])) {
+                continue; 
+            }
+
+            this.renderToast(eventConst, customMsg, typeOverride);
+            
+            await new Promise(resolve => setTimeout(resolve, this.SPAM_THRESHOLD));
+        }
+
+        this.isProcessing = false;
+    }
+
+    renderToast(eventConst, customMsg, typeOverride) {
+        const type = typeOverride || this.eventMap[eventConst] || "info";
+        const msg = customMsg || this.capitalize(eventConst);
+        
+        const visibleToasts = this.container.querySelectorAll('.toast:not(.hiding)');
+        if (visibleToasts.length >= this.MAX_VISIBLE_TOASTS) {
+            this.hide(visibleToasts[0]);
+        }
+        
+        const icons = {
+            info: 'ℹ️',
+            error: '🟥',
+            warn: '⚠️',
+            success: '✅'
+        };
+
+        const toast = document.createElement('div');
+        toast.className = `toast toast-${type}`;
+        toast.innerHTML = `
+            <span class="toast-icon">${icons[type]}</span>
+            <div class="toast-content">
+                <small style="opacity: 0.7; display: block; font-size: 0.7rem; text-transform: uppercase;">${eventConst}</small>
+                <span class="toast-message">${msg}</span>
+            </div>
+        `;
+
+        this.container.appendChild(toast);
+
+        setTimeout(() => toast.classList.add('show'), 10);
+
+        setTimeout(() => this.hide(toast), 3000);
+    }
+
+    hide(toast) {
+        if (!toast || toast.classList.contains('hiding')) return;
+        
+        toast.classList.add('hiding');
+        toast.classList.remove('show');
+        
+        toast.addEventListener('transitionend', () => {
+            toast.remove();
+        }, { once: true });
+    }
+
+    capitalize(str) {
+        return str.charAt(0).toUpperCase() + str.slice(1);
+    }
+}
+
+const toasts = new ToastSystem();
+
+const eventSource = new EventSource('/events/notifications');
+
+eventSource.onmessage = (event) => {
+    try {
+        const data = JSON.parse(event.data);
+        toasts.show(data.type, data.message);
+    } catch (e) {
+        console.error("Failed to parse event data", e);
+    }
+};
+
+eventSource.onerror = () => {
+    console.warn("EventSource failed. Server might be restarting...");
+};
+
 async function updateModelStatuses() {
     try {
         const response = await fetch('/api/models-status');
@@ -311,6 +450,6 @@ async function updateModelStatuses() {
                 if (statusEl) statusEl.innerText = model.state;
             }
         });
-    } catch (err) {}
+    } catch (err) {console.error(err)}
 }
 setInterval(updateModelStatuses, 750);

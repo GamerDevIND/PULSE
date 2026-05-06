@@ -10,14 +10,15 @@ import datetime
 import random
 
 from main.AI import AI
-from main.utils import log, estimate_tokens
+from main.utils import Logger, estimate_tokens
 from main.configs import USERNAME, DEFAULT_PROMPT, CHAOS_PROMPT, RAG_MIN_SCORE
 
 app = Quart(__name__)
-ai = AI("main/Models_configs.json", mode='multi', use_RAG=False)
+ai = AI("main/Models_config.json", mode='openrouter', use_RAG=False)
+notification_queue = asyncio.Queue()
 
 def get_greeting():
-    random.seed(random.randint(-10000, 10000))
+    
     def formal():
         now = datetime.datetime.now()
         h = now.hour
@@ -144,7 +145,7 @@ async def send_message(cid):
         except asyncio.CancelledError:
 
             await ai.cancel_generation(gen.session_id)
-            await log(f"Stream cancelled for {cid}", "warn")
+            await Logger.log_async(f"Stream cancelled for {cid}", "warn")
 
     return Response(generate(), mimetype='application/x-ndjson')
 
@@ -167,6 +168,37 @@ async def settings():
 async def models_status_api():
     states = ai.backend.get_models_state() if ai.backend else []
     return jsonify(states)
+
+@ai.event('*')
+async def all_events(**kwargs):
+    event_name = kwargs.get('event_name')
+    msg = kwargs.get('msg')
+    
+    type_map = {
+        ai.event_bus.ERROR: "error",
+        ai.event_bus.SUMMARISING_FAILED: 'error',
+        ai.event_bus.WARN: "warn",
+        ai.event_bus.SUCCESS: "success",
+        ai.event_bus.INFO: "info",
+        ai.event_bus.MODELS_LOADED: "success",
+        ai.event_bus.INITIALISED: "success"
+    }
+
+    if event_name in type_map and msg:
+        await notification_queue.put({
+            "message": msg,
+            "type": type_map.get(event_name, 'info'),
+            "event": event_name
+        })
+
+@app.route('/events/notifications')
+async def stream_notifications():
+    async def event_generator():
+        while True:
+            data = await notification_queue.get()
+            yield f"data: {json.dumps(data)}\n\n"
+            
+    return Response(event_generator(), mimetype="text/event-stream")
 
 @app.route("/temp_chat", methods=['POST'])
 async def temp_chat_endpoint():

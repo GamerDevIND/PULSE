@@ -912,3 +912,65 @@ textarea {
     z-index: 2001;
     transition: all 0.3s ease;
 }
+
+.toast-container {
+    position: fixed;
+    top: 20px;
+    left: 50%;
+    transform: translateX(-50%);
+    z-index: 9999;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 10px;
+    pointer-events: none;
+}
+
+.toast {
+    min-width: 300px;
+    max-width: 500px;
+    background: #2a2a2a;
+    color: white;
+    padding: 12px 20px;
+    border-radius: 8px;
+    box-shadow: 0 4px 15px rgba(0, 0, 0, 0.3);
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    border-left: 4px solid #555;
+    transform: translateY(-150%);
+    transition: transform 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275), opacity 0.3s;
+    opacity: 0;
+}
+
+#toast-container::-webkit-scrollbar {
+    display: none;
+}
+
+.toast.show {
+    transform: translateY(0);
+    opacity: 1;
+    pointer-events: auto;
+}
+
+.toast-info {
+    border-left-color: #3498db;
+}
+
+.toast-error {
+    border-left-color: #e74c3c;
+    background: #321c1c;
+}
+
+.toast-warn {
+    border-left-color: #f1c40f;
+}
+
+.toast-success {
+    border-left-color: #2ecc71;
+}
+
+.toast-message {
+    font-size: 0.9rem;
+    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+}

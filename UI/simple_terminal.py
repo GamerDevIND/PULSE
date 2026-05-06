@@ -7,12 +7,12 @@ import pathlib
 sys.path.append(str(pathlib.Path(__file__).parent.parent))
 
 from main.AI import AI
-from main.utils import log, estimate_tokens
+from main.utils import Logger, estimate_tokens
 
 colorama.init()
 
 async def main():
-    ai = AI("main/Models_configs.json", mode='multi', use_RAG=False)
+    ai = AI("main/Models_config.json", mode='openrouter', use_RAG=False)
     await ai.init("cli")
 
     gen = None
@@ -72,6 +72,18 @@ async def main():
     def tools(**_):
         print("Tools executed")
 
+    @ai.event(ai.event_bus.INFO)
+    def i(msg, **kw):
+        print(f"[INFO] {msg}")
+
+    @ai.event(ai.event_bus.ERROR)
+    def er(msg, **kw):
+        print(f"[ERROR] {msg}")
+    
+    @ai.event(ai.event_bus.WARN)
+    def w(msg, **kw):
+        print(f"[WARN] {msg}")
+
     async def _on_sigint():
         now = loop.time()
         if shutdown_event.is_set():
@@ -113,7 +125,7 @@ async def main():
                 signal.signal(sig, lambda *_: asyncio.create_task(shutdown()))
     
     if not sys.stdin.isatty():
-        await log("No TTY detected — running headless; waiting for signals.", "info")
+        await Logger.log_async("No TTY detected — running headless; waiting for signals.", "info")
         await shutdown_event.wait()
         if not shutdown_event.is_set():
             await shutdown()
@@ -139,7 +151,7 @@ async def main():
             if len(parts) == 2:
                 image_path, req = map(str.strip, parts)
             else:
-                await log("No image path. Continuing with text only.", "warn")
+                await Logger.log_async("No image path. Continuing with text only.", "warn")
 
         try:
             gen = await ai.create_generation(req, manual_routing=False, file_path=image_path, use_memory=False)
@@ -167,7 +179,7 @@ async def main():
                 await gen.terminate()
             print(f"{colorama.Fore.RED}Generation cancelled{colorama.Style.RESET_ALL}")
         except Exception as e:
-            await log(f"Main loop error: {e}", "error")
+            await Logger.log_async(f"Main loop error: {e}", "error")
             if not shutdown_event.is_set():
                 await shutdown()
             break
