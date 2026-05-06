@@ -1,7 +1,7 @@
 import os
 import aiohttp
 from .ollama_models import OllamaModel, IDLE, BUSY, SHUTTING_DOWN, DOWN, OllamaEmbedder
-from main.utils import log
+from main.utils import Logger
 from main.resource_manager import ResourceManager
 
 class LocalModel(OllamaModel):
@@ -39,16 +39,16 @@ class LocalModel(OllamaModel):
                         if self.model_name in downloaded_models:
                             is_actually_alive = True
                         else:
-                            await log(f"Server alive on {self.port}, but {self.model_name} not found in library.", "warn")
+                            await Logger.log_async(f"Server alive on {self.port}, but {self.model_name} not found in library.", "warn")
         except Exception as e:
-            await log(f"An error occured while checking port: {repr(e)}", 'error')
+            await Logger.log_async(f"An error occured while checking port: {repr(e)}", 'error')
 
         if is_actually_alive:
             self.resource_manager.create_session()
 
             self.warmed_up = True
             await self.change_state(IDLE)
-            await log(f"{self.name} is already alive on {self.host}. Re-linked.", "success")
+            await Logger.log_async(f"{self.name} is already alive on {self.host}. Re-linked.", "success")
             return
 
         await self._warmer(use_mmap, warmup_image_path, use_custom_keep_alive_timeout, custom_keep_alive_timeout,
@@ -60,7 +60,7 @@ class LocalModel(OllamaModel):
         await self.change_state(BUSY) 
         self.generation_cancelled = False
 
-        await log(f"Generating response from {self.name}...", "info")
+        await Logger.log_async(f"Generating response from {self.name}...", "info")
         
         if options:
             if self.use_mmap:
@@ -81,7 +81,7 @@ class LocalModel(OllamaModel):
                     await self.change_state(IDLE, False)
 
     async def shutdown(self):
-        await log(f"Shutting down {self.name}...", "info")
+        await Logger.log_async(f"Shutting down {self.name}...", "info")
 
         async with self.state_lock:
             if self.state in (DOWN, SHUTTING_DOWN):
@@ -103,7 +103,7 @@ class LocalModel(OllamaModel):
         await self.resource_manager.shutdown(True, url, headers, payload, True, True)
 
         await self.change_state(DOWN)
-        await log(f"{self.name} shutdown complete.", "success")
+        await Logger.log_async(f"{self.name} shutdown complete.", "success")
         if self.event_bus: await self.event_bus.parallel_emit(self.event_bus.INFO, msg = f"Model shutdown: {self.name} ({self.model_name})")
 
 
@@ -124,20 +124,20 @@ class LocalEmbedder(OllamaEmbedder):
             await self.resource_manager.wait_until_ready(f"{self.host}", 30)
             is_actually_alive = True
         except Exception as e:
-            await log(f"An error occured while checking port: {repr(e)}", 'error')
+            await Logger.log_async(f"An error occured while checking port: {repr(e)}", 'error')
             is_actually_alive = False
 
         if is_actually_alive:
             self.resource_manager.create_session()
             self.warmed_up = True
             await self.change_state(IDLE)
-            await log(f"{self.name} is already alive on {self.host}. Re-linked.", "success")
+            await Logger.log_async(f"{self.name} is already alive on {self.host}. Re-linked.", "success")
             return
         
         await self._warmer()
 
     async def shutdown(self):
-        await log(f"Shutting down {self.name}...", "info")
+        await Logger.log_async(f"Shutting down {self.name}...", "info")
 
         async with self.state_lock:
             if self.state in (DOWN, SHUTTING_DOWN):
@@ -159,5 +159,5 @@ class LocalEmbedder(OllamaEmbedder):
         await self.resource_manager.shutdown(True, url, headers, payload, True, True, set_session_to_None = True) 
 
         await self.change_state(DOWN)
-        await log(f"{self.name} shutdown complete.", "success")
+        await Logger.log_async(f"{self.name} shutdown complete.", "success")
         if self.event_bus: await self.event_bus.parallel_emit(self.event_bus.INFO, msg = f"Model shutdown: {self.name} ({self.model_name})")

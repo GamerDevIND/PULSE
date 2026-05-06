@@ -6,7 +6,7 @@ from main.models.model_instance import LocalEmbedder
 from main.models.models_profile import RemoteEmbedder
 from main.models.openrouter_model import OpenRouterEmbedder
 from main.configs import RAG_MIN_SCORE
-from main.utils import log
+from main.utils import Logger
 from .chunking import chunk
 from .reading import read
 from hashlib import sha256
@@ -43,7 +43,7 @@ class RAG_manager:
         await self.connect()
 
         if self.db is None: 
-            await log("DB not found!", 'error')
+            await Logger.log_async("DB not found!", 'error')
             raise ValueError
 
         if self.table: return
@@ -68,7 +68,7 @@ class RAG_manager:
         await asyncio.to_thread(self.table.optimize)
 
     async def index_document(self, file_path:str, metadata):
-        await log(f'Indexing document: {file_path}', 'info')
+        await Logger.log_async(f'Indexing document: {file_path}', 'info')
         contents = await read(file_path)
         await self.index_text(contents, metadata=metadata)
 
@@ -106,7 +106,7 @@ class RAG_manager:
             await asyncio.to_thread(self.table.create_fts_index, "text", replace=True)
             self.cache.clear()
 
-        await log(f"Indexed {len(records)} new chunks.", "info")
+        await Logger.log_async(f"Indexed {len(records)} new chunks.", "info")
 
     async def retrieve(self, query: str, top_k: int = 5, min_score: float = RAG_MIN_SCORE):
         await self.load()
@@ -259,10 +259,10 @@ class RAG_manager:
             await asyncio.to_thread(self.table.delete, f"id = '{sanitize_id(mem_id)}'")
             await asyncio.to_thread(self.table.create_fts_index, "text", replace=True)
             self.cache.clear()
-            await log(f"Deleted memory {mem_id}", "info")
+            await Logger.log_async(f"Deleted memory {mem_id}", "info")
             return True
         except Exception as e:
-            await log(f"Failed to delete memory {mem_id}: {e}", "error")
+            await Logger.log_async(f"Failed to delete memory {mem_id}: {e}", "error")
             return False
     
     async def update(self, mem_id: str, new_text: str):
@@ -296,8 +296,8 @@ class RAG_manager:
 
             self.cache.clear()
 
-            await log(f"Updated memory {mem_id}", "info")
+            await Logger.log_async(f"Updated memory {mem_id}", "info")
             return True
         except Exception as e:
-            await log(f"Failed to update memory {mem_id}: {e}", "error")
+            await Logger.log_async(f"Failed to update memory {mem_id}: {e}", "error")
             return False

@@ -1,7 +1,7 @@
 import aiohttp
 import subprocess
 import psutil
-from .utils import log
+from .utils import Logger
 import asyncio
 import os
 import sys
@@ -21,63 +21,63 @@ class SessionManager:
                 try:
                     await self.session.close()
                 except Exception as e:
-                    await log(f"An error occurred during session cleanup: {e}", "error")
+                    await Logger.log_async(f"An error occurred during session cleanup: {e}", "error")
                 
                 if set_session_to_None and (self.session and (not self.session.closed)):
                     try:
                         await self.session.close()
                         await asyncio.sleep(0.5)
                     except Exception as e:
-                        await log(f"An error occurred during session closing: {e}", "error") 
+                        await Logger.log_async(f"An error occurred during session closing: {e}", "error") 
                     self.session = None
                 
                 return
 
             if url is None:
-                await log("url cannot be none during session cleanup, aborting...", 'warn')
+                await Logger.log_async("url cannot be none during session cleanup, aborting...", 'warn')
                 return
             try:
                 async with self.session.post(url, json=payload, headers=headers, timeout=aiohttp.ClientTimeout(total=15)) as resp:
                     resp.raise_for_status()
             except Exception as e:
-                await log(f"An error occurred during session cleanup: {e}", "error") 
+                await Logger.log_async(f"An error occurred during session cleanup: {e}", "error")
 
             await asyncio.sleep(1.5) 
             try:
                 await self.session.close()
             except Exception as e:
-                await log(f"An error occurred during session cleanup: {e}", "error")
+                await Logger.log_async(f"An error occurred during session cleanup: {e}", "error")
 
         if set_session_to_None and (self.session and (not self.session.closed)):
             try:
                 await self.session.close()
                 await asyncio.sleep(0.5)
             except Exception as e:
-                await log(f"An error occurred during session closing: {e}", "error") 
+                await Logger.log_async(f"An error occurred during session closing: {e}", "error") 
             self.session = None
 
     async def wait_until_ready(self, url: str, timeout: int = 30):
-        await log(f"Waiting for {self.model_name} on {url}...", "info")
+        await Logger.log_async(f"Waiting for {self.model_name} on {url}...", "info")
         try:
             check_session = self.session if self.session and not self.session.closed else aiohttp.ClientSession()
             for i in range(timeout):
                 try:
                     async with check_session.get(f"{url}/api/tags") as res:
                         if res.status == 200:
-                            await log(f"{self.model_name} is alive! Testing response...", "success")
+                            await Logger.log_async(f"{self.model_name} is alive! Testing response...", "success")
                             js = await res.json(encoding='utf-8')
                             models = [m['name'] for m in js.get("models", [])]
                             if self.model_name in models or f'{self.model_name}:latest' in models:
                                     
-                                await log(f'{self.model_name} is online!', 'info')
+                                await Logger.log_async(f'{self.model_name} is online!', 'info')
                                 return
                             else:
-                                await log(f"Model not found in the HTTP model library! Avaliable models: {', '.join(models)}", 'warn')
+                                await Logger.log_async(f"Model not found in the HTTP model library! Avaliable models: {', '.join(models)}", 'warn')
                                 raise ModuleNotFoundError("Model not found in the HTTP model library")
                             
                                 
                 except (aiohttp.ClientError, asyncio.TimeoutError) as e:
-                    await log(f"Retries: {i+1} / {timeout}", "info")
+                    await Logger.log_async(f"Retries: {i+1} / {timeout}", "info")
                 await asyncio.sleep(1)
             raise TimeoutError(f"🟥 Ollama server for {self.model_name} did not start in time.")
         finally:
@@ -93,9 +93,9 @@ class ResourceManager(SessionManager):
 
     def create_process(self, command, env):
         try:
-            log_dir = os.path.join("main", "logs")
+            log_dir = os.path.join("main", "Logger.log_asyncs")
             os.makedirs(log_dir, exist_ok=True)
-            log_file_path = os.path.join(log_dir, f"{self.ref_name}.log")
+            log_file_path = os.path.join(Logger.log_dir, f"{self.ref_name}.log")
 
             f = open(log_file_path, "w")
             self._log_file = f
@@ -125,7 +125,7 @@ class ResourceManager(SessionManager):
     async def shutdown(self, send_shutdown_paylod = True, url = None, headers:dict|None = None, payload=None, session_cleanup= True, process_cleanup=False, set_session_to_None = True):
         if session_cleanup:
             if send_shutdown_paylod and (url is None or payload is None):
-                await log("url or paylaod cannot be none during session cleanup, aborting...", 'warn')
+                await Logger.log_async("url or paylaod cannot be none during session cleanup, aborting...", 'warn')
                 return
             
             await super().shutdown(send_shutdown_paylod, url, headers, payload, set_session_to_None)
@@ -133,7 +133,7 @@ class ResourceManager(SessionManager):
         if process_cleanup:
             if self.process is not None:
                 pid = self.process.pid
-                await log(f"Cleaning up process tree for {self.ref_name} (PID {pid})...", "info")
+                await Logger.log_async(f"Cleaning up process tree for {self.ref_name} (PID {pid})...", "info")
 
                 try:
                     parent = psutil.Process(pid)
@@ -150,7 +150,7 @@ class ResourceManager(SessionManager):
                     gone, alive = await asyncio.to_thread(psutil.wait_procs, all_procs, timeout=10)
 
                     if alive:
-                        await log(f"{len(alive)} processes resisted termination. Escalating to SIGKILL...", "warning")
+                        await Logger.log_async(f"{len(alive)} processes resisted termination. Escalating to SIGKILL...", "warn")
                         for p in alive:
                             try:
                                 p.kill()
@@ -158,9 +158,9 @@ class ResourceManager(SessionManager):
                                 pass
 
                 except psutil.NoSuchProcess:
-                    await log(f"Process {pid} already terminated.", "debug")
+                    await Logger.log_async(f"Process {pid} already terminated.", "debug")
                 except Exception as e:
-                    await log(f"Error during shutdown of {self.ref_name}: {e}", "error")
+                    await Logger.log_async(f"Error during shutdown of {self.ref_name}: {e}", "error")
                 finally:
                     self.process = None
 
@@ -169,5 +169,5 @@ class ResourceManager(SessionManager):
                 self._log_file.flush()
                 self._log_file.close()
             except Exception as e:
-                await log(f"An error occurred during process file cleanup: {e}", "info")
+                await Logger.log_async(f"An error occurred during process file cleanup: {e}", "info")
             self._log_file = None 

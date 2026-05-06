@@ -2,7 +2,7 @@ import os
 import asyncio
 import aiohttp
 import json
-from main.utils import log, strip_thinking
+from main.utils import Logger, strip_thinking
 from main.configs import IMAGE_EXTs, VIDEO_EXTs, AUDIO_EXTs, ERROR_TOKEN
 from main.events import EventBus
 from .base_model import Model
@@ -59,7 +59,7 @@ class OllamaModel(Model):
         try:
             return await self.input_handler.encode_frames_from_vid(video_path, False, mod_, format_, 5)
         except Exception as e:
-            await log(f"Error in video frame encoding for {self.name}: {e}", 'error')
+            await Logger.log_async(f"Error in video frame encoding for {self.name}: {e}", 'error')
             return ERROR_TOKEN, repr(e)
     
     async def _encode_image(self, image_path):
@@ -80,17 +80,21 @@ class OllamaModel(Model):
             if ext in IMAGE_EXTs:
                 image, e = await self._encode_image(image_path=file_path)
                 if image == ERROR_TOKEN:
-                    await log(f"Error encoding image! Skipping: {repr(e)}", 'error')
+                    await Logger.log_async(f"Error encoding image! Skipping: {repr(e)}", 'error')
                 else:
                     data['messages'][-1]['images'] = [image]
-            elif ext in VIDEO_EXTs and self.has_video:
+            if ext in VIDEO_EXTs and self.has_video:
                 frames, e = await self._encode_frames_from_vid(video_path=file_path, mod_= mod_, format_=video_save_buffer_format)
                 if frames == ERROR_TOKEN:
-                    await log(f"Error encoding video! Skipping: {repr(e)}", 'error')
+                    await Logger.log_async(f"Error encoding video! Skipping: {repr(e)}", 'error')
                 else:
-                    data['messages'][-1]['images'] = frames
+                    d = data['messages'][-1]['images']
+                    if isinstance(d, list):
+                        d.extend(frames)
+                    else:
+                        d = frames
             elif ext in VIDEO_EXTs and not self.has_video:
-                await log(f"Cannot process video file {file_path}: Model {self.name} is not configured for video processing.", 'warn')
+                await Logger.log_async(f"Cannot process video file {file_path}: Model {self.name} is not configured for video processing.", 'warn')
                 
         if self.has_audio and file_path is not None:
             ext = os.path.splitext(file_path)[1].lower()
@@ -98,10 +102,11 @@ class OllamaModel(Model):
                 audio, e = await self._encode_audio(audio_path=file_path)
 
                 if audio  == ERROR_TOKEN:
-                    await log(f"Error encoding Audio! Skipping: {repr(e)}", 'error')
+                    await Logger.log_async(f"Error encoding Audio! Skipping: {repr(e)}", 'error')
                 else:
                     current_images = data['messages'][-1].get('images', [])
-                    current_images.append(audio)
+                    if audio not in current_images:
+                        current_images.append(audio)
                     data['messages'][-1]['images'] = current_images
 
         return data
@@ -141,7 +146,7 @@ class OllamaModel(Model):
 
         buffer = ""
 
-        if self.event_bus: await self.event_bus.parallel_emit(self.event_bus.INFO, msg = "Generating response...")
+        if self.event_bus: await self.event_bus.parallel_emit(self.event_bus.INFO, msg = f"Generating response for {self.name}({self.model_name}) [{self.role}]...")
 
         try:
             timeout = aiohttp.ClientTimeout(total=None)
@@ -153,7 +158,7 @@ class OllamaModel(Model):
                         async for raw_chunk in response.content.iter_chunked(1024):
 
                             if self.generation_cancelled:
-                                await log(f"Cancellation requested for {self.name}, breaking stream", "info")
+                                await Logger.log_async(f"Cancellation requested for {self.name}, breaking stream", "info")
                                 break
 
                             chunk = raw_chunk.decode("utf-8", errors='ignore')
@@ -183,7 +188,7 @@ class OllamaModel(Model):
                                 await response.release()
 
                     except asyncio.CancelledError:
-                        await log(f"Generation cancelled for {self.name}", "info")
+                        await Logger.log_async(f"Generation cancelled for {self.name}", "info")
                         await response.release()
                         response.close()
                         return 
@@ -203,19 +208,19 @@ class OllamaModel(Model):
 
                         yield (thinking, content, tools)
                     except asyncio.CancelledError:
-                        await log(f"Non-stream generation cancelled for {self.name}", "info")
+                        await Logger.log_async(f"Non-stream generation cancelled for {self.name}", "info")
                         await response.release()
                         response.close()
                         return 
 
         except asyncio.CancelledError:
-            await log(f"Request cancelled for {self.name}", "info")
+            await Logger.log_async(f"Request cancelled for {self.name}", "info")
            
             self.generation_cancelled = False          
             return
 
         except Exception as e:
-            await log(f"Ollama API Request Error: {e}", "error")
+            await Logger.log_async(f"Ollama API Request Error: {e}", "error")
             if self.event_bus: await self.event_bus.parallel_emit(self.event_bus.ERROR, msg = f"Ollama API Request Error: {e}")
             yield (ERROR_TOKEN, ERROR_TOKEN, [])
 
@@ -265,42 +270,42 @@ class OllamaModel(Model):
             
             if self.has_vision:
                     if self.has_video and os.path.exists(warmup_video_path):
-                        await log("Warming up with video frame extraction...", 'info')
+                        await Logger.log_async("Warming up with video frame extraction...", 'info')
                         encoded_frames, e = await self._encode_frames_from_vid(warmup_video_path, mod_=50)
                         if encoded_frames == ERROR_TOKEN:
-                            await log(f"Error encoding video frames for warmup: {e}, UX will degrade.", 'warn')
+                            await Logger.log_async(f"Error encoding video frames for warmup: {e}, UX will degrade.", 'warn')
 
                         if encoded_frames and encoded_frames != ERROR_TOKEN:
                             if "messages" in data:
                                 data['messages'][-1]['images'] = encoded_frames
                     elif os.path.exists(warmup_image_path):
-                        await log("Warming up with static image...", 'info')
+                        await Logger.log_async("Warming up with static image...", 'info')
                         encoded_image, e = await self._encode_image(warmup_image_path)
                         if encoded_image == ERROR_TOKEN:
-                            await log(f"Error encoding image for warmup!: {e}, UX will degrade.", 'warn')
+                            await Logger.log_async(f"Error encoding image for warmup!: {e}, UX will degrade.", 'warn')
                         else:
                             if "messages" in data:
                                 data['messages'][-1]['images'] = [encoded_image]
                     else:
-                        await log("Vision model, but no video processing enabled and no warmup image / video found. Skipping vision test.", 'warn')
+                        await Logger.log_async("Vision model, but no video processing enabled and no warmup image / video found. Skipping vision test.", 'warn')
 
             data["options"] = options
 
             if not self.resource_manager.session: raise
 
-            await log('Trying Non-Streaming...' ,'info')
+            await Logger.log_async('Trying Non-Streaming...' ,'info')
             async with self.resource_manager.session.post(url, headers=headers, data=json.dumps(data)) as response: 
                 response.raise_for_status()
                 try:
                     resp = await response.json()
-                    await log(f"Raw non-streaming chunk: {resp}", 'info')
+                    await Logger.log_async(f"Raw non-streaming chunk: {resp}", 'info')
                 except Exception as e:
-                    await log(f"Failed to load model's response while non streaming: {repr(e)}", 'error')
-                    raise Exception(f"Failed to load model's response while non streaming: {repr(e)}")
+                    await Logger.log_async(f"Failed to load model's response while non streaming: {repr(e)}", 'error')
+                    raise Exception(f"Failed to load model's response while non streaming: {repr(e)}") from e
 
             data['stream'] = True
 
-            await log('Trying Streaming...' ,'info')
+            await Logger.log_async('Trying Streaming...' ,'info')
             buffer = ""
             try:
                 async with self.resource_manager.session.post(url, headers=headers, data=json.dumps(data)) as response:
@@ -319,15 +324,15 @@ class OllamaModel(Model):
                                 _ = json_line.get("message", {}).get("thinking", "")
                                 _ = json_line.get("message", {}).get("content", "")
                                 _ = json_line.get("message", {}).get("tool_calls", []) 
-                                await log(f"Raw streaming chunk: {json_line}", 'info')
+                                await Logger.log_async(f"Raw streaming chunk: {json_line}", 'info')
                             except json.JSONDecodeError:
                                 continue
             except Exception as e:
-                    await log(f"Failed to load model's response while streaming: {repr(e)}", 'error')
-                    raise Exception(f"Failed to load model's response while streaming: {repr(e)}")
+                    await Logger.log_async(f"Failed to load model's response while streaming: {repr(e)}", 'error')
+                    raise Exception(f"Failed to load model's response while streaming: {repr(e)}") from e
                     
             self.warmed_up = True
-            await log(f"{self.name} ({self.model_name}) warmed up!", "success")
+            await Logger.log_async(f"{self.name} ({self.model_name}) warmed up!", "success")
             if self.event_bus: await self.event_bus.parallel_emit(self.event_bus.INFO, msg = f"{self.name} ({self.model_name}) warmed up!")
 
         except Exception:
@@ -400,7 +405,7 @@ class OllamaEmbedder(Model):
 
         if not self.resource_manager.session: raise
 
-        if self.event_bus: await self.event_bus.parallel_emit(self.event_bus.INFO, msg = "Embedding input(s)")
+        if self.event_bus: await self.event_bus.parallel_emit(self.event_bus.INFO, msg = f"Embedding input(s) with {self.name}({self.model_name})")
 
         try:
             timeout = aiohttp.ClientTimeout(total=120)
@@ -419,16 +424,16 @@ class OllamaEmbedder(Model):
                     embeds = res_json.get('embeddings', [])
                     return embeds
                 except asyncio.CancelledError:
-                    await log(f"Non-stream generation cancelled for {self.name}", "info")
+                    await Logger.log_async(f"Non-stream generation cancelled for {self.name}", "info")
 
         except asyncio.CancelledError:
-            await log(f"Request cancelled for {self.name}", "info")
+            await Logger.log_async(f"Request cancelled for {self.name}", "info")
            
             self.generation_cancelled = False
             return
 
         except Exception as e:
-            await log(f"Ollama API Request Error: {e}", "error")
+            await Logger.log_async(f"Ollama API Request Error: {e}", "error")
             if self.event_bus: await self.event_bus.parallel_emit(self.event_bus.ERROR, msg = f"Ollama API Request Error: {e}")
             return (ERROR_TOKEN)
         
@@ -479,12 +484,12 @@ class OllamaEmbedder(Model):
                 try:
                     res_json = await response.json()
                     embeds = res_json.get('embeddings', [])
-                    await log(f'Raw output: {embeds}', 'info')
+                    await Logger.log_async(f'Raw output: {embeds}', 'info')
                     if self.event_bus: await self.event_bus.parallel_emit(self.event_bus.INFO, msg = f"Warming up done for: {self.name}({self.model_name})")
                     self.warmed_up = True
                 except Exception as e:
-                    await log(f"Failed to load embedding model's response while warming up: {repr(e)}", 'error')
-                    raise Exception(f"Failed to load embedding model's response while warming up: {repr(e)}")
+                    await Logger.log_async(f"Failed to load embedding model's response while warming up: {repr(e)}", 'error')
+                    raise Exception(f"Failed to load embedding model's response while warming up: {repr(e)}") from e
         except Exception:
             self.warmed_up = False
             raise RuntimeError

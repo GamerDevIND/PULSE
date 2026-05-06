@@ -7,7 +7,7 @@ from main.events import EventBus
 from main.configs import ENV_READ_PREFIX
 from main.generation_session import GenerationSession, DONE, FAIL, CANCELLED 
 from main.tools import ToolRegistry
-from main.utils import log
+from main.utils import Logger
 from main.configs import ERROR_TOKEN, EMBEDDING_MODEL_ROLE
 import inspect
 import json
@@ -26,7 +26,7 @@ class Backend:
         self.check_lock = asyncio.Lock()
 
     def _create_model_data(self, models_data, model, embedder, override_port = False, overwritten_port=11343, auto_resolve_ports = True, require_key = False):
-        if self.event_bus:asyncio.create_task(self.event_bus.parallel_emit(self.event_bus.MODELS_LOADING))
+        if self.event_bus:asyncio.create_task(self.event_bus.parallel_emit(self.event_bus.INFO, True, msg='Loading models'))
 
         for model_data in models_data:
                     role = model_data.get('role')
@@ -45,6 +45,26 @@ class Backend:
                         model_data['api_key'] = key
                     if require_key and not key: raise ValueError(f'No API key provided for {model_data["model_name"]}')
 
+                    has_audio = model_data.get("has_audio",)
+                    if has_audio is None:
+                        asyncio.create_task(Logger.log_async(f'has_audio for {model_data['model_name']} is not set, defaulting to false', 'warn'))
+                        has_audio = False
+                    
+                    model_data['has_audio'] = has_audio
+
+                    has_vision = model_data.get("has_vision",)
+                    if has_vision is None:
+                        asyncio.create_task(Logger.log_async(f'has_vision for {model_data['model_name']} is not set, defaulting to false', 'warn'))
+                        has_vision = False
+
+                    model_data['has_vision'] = has_vision
+    
+                    has_tools = model_data.get("has_tools",)
+                    if has_tools is None:
+                        asyncio.create_task(Logger.log_async(f'has_tools for {model_data['model_name']} is not set, defaulting to false', 'warn'))
+                        has_tools = False
+                    model_data['has_tools'] = has_tools
+
                     if role:
                         if role != EMBEDDING_MODEL_ROLE:
                             system = model_data.get("system_prompt")
@@ -61,7 +81,7 @@ class Backend:
                         if self.event_bus:asyncio.create_task(self.event_bus.parallel_emit(self.event_bus.ERROR, True, msg= "No role provided"))
                         raise KeyError("No role provided")    
 
-        if self.event_bus: asyncio.create_task(self.event_bus.parallel_emit(self.event_bus.MODELS_LOADED))
+        if self.event_bus:asyncio.create_task(self.event_bus.parallel_emit(self.event_bus.INFO, True, msg='Models loaded'))
         
 
     def _load(self, model, embedder, override_port = False, overwritten_port=11343, auto_resolve_ports = True, require_key = False):
@@ -72,7 +92,7 @@ class Backend:
     
         except (FileNotFoundError, json.JSONDecodeError) as e:
             print(f"🟥 Error loading models: {e}")
-            raise Exception("Models loading failed.", e)
+            raise Exception("Models loading failed.", e) from e
 
     async def _async_load(self, model, embedder, override_port = False, overwritten_port=11343, auto_resolve_ports = True, require_key = False):
         try:
@@ -83,8 +103,8 @@ class Backend:
                 self._create_model_data(models_data, model, embedder, override_port, overwritten_port, auto_resolve_ports, require_key)
 
         except (FileNotFoundError, json.JSONDecodeError) as e:
-            await log(f"🟥 Error loading models: {e}", "error")
-            raise Exception("Models loading failed.", e)
+            await Logger.log_async(f"🟥 Error loading models: {e}", "error")
+            raise Exception("Models loading failed.", e) from e
 
     async def cancel_generation(self, session_id:str):
         session = self.sessions.get(session_id)
@@ -108,7 +128,7 @@ class Backend:
                 if not model.warmed_up:
                     await model.warm_up()
                 else:
-                    await log(f"{model.name} ({model.model_name}) is already warmed, skipping... This maybe abnormal, please ensure the initilising logic.", 'warn')
+                    await Logger.log_async(f"{model.name} ({model.model_name}) is already warmed, skipping... This maybe abnormal, please ensure the initilising Logger.log_asyncic.", 'warn')
 
 
         t = asyncio.create_task(self._check_sessions())
@@ -132,7 +152,7 @@ class Backend:
                     if session:
                         if session.state not in [CANCELLED, DONE, FAIL]: await session.cancel()
                         del self.sessions[s_id]
-                        await log(f"Session {s_id} cleaned up.", "info", stdout=False)
+                        await Logger.log_async(f"Session {s_id} cleaned up.", "info", stdout=False)
 
             await asyncio.sleep(10)
 
@@ -140,13 +160,13 @@ class Backend:
                 options: dict | None = None, format_: dict | None = None, max_turns = 10, abs_max_turns = 50, regen_consent_callback= None, temp_remove_tool_name = None):
         
         if role == EMBEDDING_MODEL_ROLE:
-            await log('Cannot create a session with an embedding model!', 'error')
+            await Logger.log_async('Cannot create a session with an embedding model!', 'error')
             raise ValueError
 
         model_obj = self.models.get(role)
 
         if not model_obj:
-            await log(f"{role} not found in the model registry!","error")
+            await Logger.log_async(f"{role} not found in the model registry!","error")
             raise KeyError
 
         active_tools = None
@@ -156,7 +176,7 @@ class Backend:
 
         if temp_remove_tool_name and active_tools:
             active_tools = [t for t in active_tools if t.get('function', {}).get('name') != temp_remove_tool_name]
-            await log(f"Temporarily disabled {temp_remove_tool_name} for this turn.", "info")
+            await Logger.log_async(f"Temporarily disabled {temp_remove_tool_name} for this turn.", "info")
         
         session = GenerationSession(query, context, tools_regis, model_obj, # type:ignore
                 system_prompt_override, options, format_, max_turns, abs_max_turns, regen_consent_callback, 
@@ -230,13 +250,13 @@ class Generation:
                     if inspect.isawaitable(r):
                         await r
                 except Exception as e:
-                    await log(f"Removing callback failed for {self.session_id}; {repr(e)}", 'error')
+                    await Logger.log_async(f"Removing callback failed for {self.session_id}; {repr(e)}", 'error')
                 try:
                     r = self.append_callback(c)
                     if inspect.isawaitable(r):
                         await r
                 except Exception as e:
-                    await log(f"Appending callback failed for {self.session_id}; {repr(e)}", 'error')
+                    await Logger.log_async(f"Appending callback failed for {self.session_id}; {repr(e)}", 'error')
 
             finally:
                 if self.event_bus:

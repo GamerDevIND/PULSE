@@ -3,7 +3,7 @@ from main.models.ollama_models import WARMING_UP
 import aiohttp
 import asyncio
 from main.tools import Tool
-from main.utils import log
+from main.utils import Logger
 from .backend import Backend
 from main.events import EventBus
 
@@ -41,14 +41,14 @@ class MultiServer(Backend):
                 is_alive = await self._ping_model_tag(model.host)
 
                 if not is_alive:
-                    await log(f"CRITICAL: {model.name} API is down. Restarting...", "error")
+                    await Logger.log_async(f"CRITICAL: {model.name} API is down. Restarting...", "error")
                     cooldowns[name] = 5
                     await model.warm_up()
 
             await asyncio.sleep(interval)
 
     async def init(self, tools_list:list[Tool]):
-        await log("Loading all models...", 'info')
+        await Logger.log_async("Loading all models...", 'info')
 
         await self._init(*tools_list)
 

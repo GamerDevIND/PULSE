@@ -4,7 +4,7 @@ import json
 from main.resource_manager import SessionManager
 from main.events import EventBus
 from .base_model import Model
-from main.utils import log, strip_thinking
+from main.utils import Logger, strip_thinking
 from main.configs import IMAGE_EXTs, VIDEO_EXTs, AUDIO_EXTs, ERROR_TOKEN
 from copy import deepcopy
 import os
@@ -68,7 +68,7 @@ class OpenRouterModel(Model):
         try:
             return await self.input_handler.encode_frames_from_vid(video_path, self.url_media_valid, mod_, format_, 5)
         except Exception as e:
-            await log(f"Error in video frame encoding for {self.name}: {e}", 'error')
+            await Logger.log_async(f"Error in video frame encoding for {self.name}: {e}", 'error')
             return ERROR_TOKEN, repr(e)
     
     async def _encode_image(self, image_path):
@@ -79,97 +79,91 @@ class OpenRouterModel(Model):
 
     async def get_multimodal_data(self, data, query:str | None, file_path, mod_, video_save_buffer_format):
         data = data.copy()
-        if query and query.strip(): 
-            if self.has_vision and file_path is not None:
-                ext = os.path.splitext(file_path)[1].lower()
-                if ext in IMAGE_EXTs:
-                    image, e = await self._encode_image(image_path=file_path)
-                    if image == ERROR_TOKEN:
-                        await log(f"Error encoding image! Skipping: {repr(e)}", 'error')
+        if (query and query.strip()) and file_path and (self.has_vision or self.has_audio): 
+            last_msg = data['messages'][-1]
+            if isinstance(last_msg.get('content'), str):
+                last_msg['content'] = [{'type': 'text', 'text': last_msg['content']}]
+            else:
+                last_msg = data['messages'][-1]
+            if isinstance(last_msg.get('content'), list):
+                text_content = next((item['text'] for item in last_msg['content'] if item['type'] == 'text'), "")
+                last_msg['content'] = text_content
+
+        if self.has_vision and file_path is not None:
+            ext = os.path.splitext(file_path)[1].lower()
+            if ext in IMAGE_EXTs:
+                image, e = await self._encode_image(image_path=file_path)
+                if image == ERROR_TOKEN:
+                    await Logger.log_async(f"Error encoding image! Skipping: {repr(e)}", 'error')
+                else:
+                    data_url = f"data:image/jpeg;base64,{image}"
+                    d = data['messages'][-1].get('content', [])
+                    if not isinstance(d, list):
+                        d = [d]
+                    
+                    d.append({
+                    "type": "image_url",
+                    "image_url": {
+                        "url": data_url
+                    }
+                    })
+                            
+            if (self.input_handler.is_url(file_path) or ext in VIDEO_EXTs) and self.has_video:
+                frames, e = await self._encode_frames_from_vid(video_path=file_path, mod_= mod_, format_=video_save_buffer_format)
+                if frames == ERROR_TOKEN:
+                    await Logger.log_async(f"Error encoding video! Skipping: {repr(e)}", 'error')
+
+                else:
+
+                    if not isinstance(frames, list):
+                        data_url = file_path if self.input_handler.is_url(file_path) else f"data:video/mp4;base64,{frames}"
+                        d = data['messages'][-1].get('content', [])
+                        if not isinstance(d, list):
+                            d = [d]
+                        d.append({
+                                "type": "video_url",
+                                "video_url": {
+                                    "url": data_url
+                                }
+                            })
                     else:
-                        data_url = f"data:image/jpeg;base64,{image}"
-                        data['messages'][-1] = {
-                            'role': 'user',
-                            'content': [
-                                {
-                                    'type': 'text',
-                                    "text": query
-                                },
-                                {
+                        d = data['messages'][-1].get('content', [])
+                        if not isinstance(d, list):
+                            d = [d]
+                        for frame in frames:
+
+                            d.append({
                                     "type": "image_url",
                                     "image_url": {
-                                        "url": data_url
-                                    }
-                                }
-                            ]
+                                    "url": f"data:image/jpeg;base64,{frame}"
+                                        }
+                                })
+                                
+                        data['messages'][-1]["content"] = d
+
+            elif ext in VIDEO_EXTs and not self.has_video:
+                await Logger.log_async(f"Cannot process video file {file_path}: Model {self.name} is not configured for video processing.", 'warn')
+
+        if self.has_audio and file_path is not None:
+            ext = os.path.splitext(file_path)[1].lower()
+            if ext in AUDIO_EXTs:
+                audio, e = await self._encode_audio(audio_path=file_path)
+
+                if audio  == ERROR_TOKEN:
+                    await Logger.log_async(f"Error encoding Audio! Skipping: {repr(e)}", 'error')
+                else:
+                    d = data['messages'][-1]['content'] 
+                    
+                    if not isinstance(d, list):
+                        d = [d]
+
+                    d.append({
+                        "type": "input_audio",
+                        "input_audio": {
+                            "data": audio,
+                            "format": f"{ext.removeprefix('.')}"
                         }
-                elif (self.input_handler.is_url(file_path) or ext in VIDEO_EXTs) and self.has_video:
-                    frames, e = await self._encode_frames_from_vid(video_path=file_path, mod_= mod_, format_=video_save_buffer_format)
-                    if frames == ERROR_TOKEN:
-                        await log(f"Error encoding video! Skipping: {repr(e)}", 'error')
-
-                    else:
-                        if not isinstance(frames, list):
-                            data_url = file_path if self.input_handler.is_url(file_path) else f"data:video/mp4;base64,{frames}"
-                            data['messages'][-1] = {
-                                'role': 'user',
-                                'content': [
-                                    {
-                                        'type': 'text',
-                                        "text": query
-                                    },
-                                    {
-                                        "type": "video_url",
-                                        "video_url": {
-                                            "url": data_url
-                                        }
-                                    }
-                                ]
-                            }
-                        else:
-                            data['messages'][-1] = {
-                                'role': 'user',
-                                'content': [
-                                    {
-                                        'type': 'text',
-                                        "text": query
-                                    }
-                                ]
-                            }
-                            for frame in frames:
-                                data['messages'][-1]['content'].append({
-                                        "type": "image_url",
-                                        "image_url": {
-                                        "url": f"data:image/jpeg;base64,{frame}"
-                                        }
-                                    })
-
-                elif ext in VIDEO_EXTs and not self.has_video:
-                    await log(f"Cannot process video file {file_path}: Model {self.name} is not configured for video processing.", 'warn')
-
-            if self.has_audio and file_path is not None:
-                ext = os.path.splitext(file_path)[1].lower()
-                if ext in AUDIO_EXTs:
-                    audio, e = await self._encode_audio(audio_path=file_path)
-
-                    if audio  == ERROR_TOKEN:
-                        await log(f"Error encoding Audio! Skipping: {repr(e)}", 'error')
-                    else:
-                        d = data['messages'][-1]['content'] 
-
-                        if not {'type': 'text', "text": query} in d:
-                            d.append({
-                                'type': 'text',
-                                "text": query
-                            })
-                            
-                        d.append({
-                            "type": "input_audio",
-                            "input_audio": {
-                                "data": audio,
-                                "format": f"{ext.removeprefix('.')}"
-                            }
-                        })
+                    })
 
         return data
 
@@ -214,7 +208,7 @@ class OpenRouterModel(Model):
 
         if not self.resource_manager.session: raise
         await self.change_state(BUSY)
-        if self.event_bus: await self.event_bus.parallel_emit(self.event_bus.INFO, msg = "Generating response...")
+        if self.event_bus: await self.event_bus.parallel_emit(self.event_bus.INFO, msg = f"Generating response for {self.name}({self.model_name}) [{self.role}]...")
 
         buffer = ""
 
@@ -223,7 +217,7 @@ class OpenRouterModel(Model):
             async with self.resource_manager.session.post(self.host, headers=headers, data=json.dumps(data), timeout=timeout) as response:
                 if response.status != 200:
                     error_data = await response.json()
-                    await log(f"Error during generation of {self.name}: {error_data['error']['message']}", 'error')
+                    await Logger.log_async(f"Error during generation of {self.name}: {error_data['error']['message']}", 'error')
                     yield (ERROR_TOKEN, ERROR_TOKEN, [])
                     return
                 
@@ -253,7 +247,7 @@ class OpenRouterModel(Model):
                                     json_line = json.loads(line)
 
                                     if "error" in json_line:
-                                        await log(f"Error during generation of {self.name}: {json_line['error']['message']}", 'error')
+                                        await Logger.log_async(f"Error during generation of {self.name}: {json_line['error']['message']}", 'error')
                                         yield (ERROR_TOKEN, ERROR_TOKEN, [])
                                         await self.change_state(IDLE)
                                         return
@@ -274,7 +268,7 @@ class OpenRouterModel(Model):
                                 await response.release()
 
                     except asyncio.CancelledError:
-                        await log(f"Generation cancelled for {self.name}", "info")
+                        await Logger.log_async(f"Generation cancelled for {self.name}", "info")
                         await response.release()
                         response.close()
                         await self.change_state(IDLE)
@@ -301,19 +295,17 @@ class OpenRouterModel(Model):
                                         
                         yield (thinking, content, tools)
                     except asyncio.CancelledError:
-                        await log(f"Non-stream generation cancelled for {self.name}", "info")
+                        await Logger.log_async(f"Non-stream generation cancelled for {self.name}", "info")
                         await response.release()
                         response.close()
                         await self.change_state(IDLE)
                         return 
 
         except asyncio.CancelledError:
-            await log(f"Request cancelled for {self.name}", "info")    
+            await Logger.log_async(f"Request cancelled for {self.name}", "info")    
             return
 
         except Exception as e:
-            # await log(f"Openrouter API Request Error: {e}", "error")
-            raise e
             if self.event_bus: await self.event_bus.parallel_emit(self.event_bus.ERROR, msg = f"Openrouter API Request Error: {e}")
             yield (ERROR_TOKEN, ERROR_TOKEN, [])
             
@@ -390,7 +382,7 @@ class OpenRouterEmbedder(Model):
         if not self.resource_manager.session: self.resource_manager.create_session()
         if not self.resource_manager.session: raise   
 
-        if self.event_bus: await self.event_bus.parallel_emit(self.event_bus.INFO, msg = "Embedding input(s)")
+        if self.event_bus: await self.event_bus.parallel_emit(self.event_bus.INFO, msg = f"Embedding input(s) with {self.name}({self.model_name})")
 
         try:
             timeout = aiohttp.ClientTimeout(total=120)
@@ -405,14 +397,14 @@ class OpenRouterEmbedder(Model):
                     embeds = [item.get('embedding', []) for item in data_list]
                     return embeds if isinstance(input_, list) else embeds[0]
                 except asyncio.CancelledError:
-                    await log(f"Non-stream generation cancelled for {self.name}", "info")
+                    await Logger.log_async(f"Non-stream generation cancelled for {self.name}", "info")
 
         except asyncio.CancelledError:
-            await log(f"Request cancelled for {self.name}", "info")
+            await Logger.log_async(f"Request cancelled for {self.name}", "info")
             return
 
         except Exception as e:
-            await log(f"Openrouter API Request Error: {e}", "error")
+            await Logger.log_async(f"Openrouter API Request Error: {e}", "error")
             if self.event_bus: await self.event_bus.parallel_emit(self.event_bus.ERROR, msg = f"Openrouter API Request Error: {e}")
             return (ERROR_TOKEN)
         

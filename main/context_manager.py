@@ -1,4 +1,4 @@
-from .utils import log
+from .utils import Logger
 from .configs import FILE_NAME_KEY
 import json 
 import asyncio
@@ -35,7 +35,7 @@ class ContextManager:
 
     async def context_resolver(self, cid, file_name_key=FILE_NAME_KEY, max_keeps=1, auto_save=True):
         if not cid in self.conversations:
-            await log(f"'{cid}' isn't in the registry", 'warn')
+            await Logger.log_async(f"'{cid}' isn't in the registry", 'warn')
             return []
         c = self.conversations[cid]
         await c.flush_queue()
@@ -50,7 +50,7 @@ class ContextManager:
 
     async def add_and_maintain(self, cid, data:dict | list[dict] | tuple[dict], update:bool = False):
         if not cid in self.conversations:
-            await log(f"{cid} not in registry", 'error')
+            await Logger.log_async(f"{cid} not in registry", 'error')
             return
         
         convo = self.conversations[cid]
@@ -70,20 +70,20 @@ class ContextManager:
 
     async def get_context(self, cid):
         if not cid in self.conversations:
-            await log(f"'{cid}' isn't in the registry", 'warn')
+            await Logger.log_async(f"'{cid}' isn't in the registry", 'warn')
             return []
         c = self.conversations[cid]
         return await c.get_context()
         
     async def rename_convo(self, cid, name):
         if not cid in self.conversations:
-            await log(f"'{cid}' isn't in the registry", 'warn')
+            await Logger.log_async(f"'{cid}' isn't in the registry", 'warn')
             return 
         await self.conversations[cid].rename(name)
 
     async def get_summary(self, cid):
         if not cid in self.conversations:
-            await log(f"'{cid}' isn't in the registry", 'warn')
+            await Logger.log_async(f"'{cid}' isn't in the registry", 'warn')
             return ''
         c = self.conversations[cid]
 
@@ -91,7 +91,7 @@ class ContextManager:
 
     async def get_facts(self, cid):
         if not cid in self.conversations:
-            await log(f"'{cid}' isn't in the registry", 'warn')
+            await Logger.log_async(f"'{cid}' isn't in the registry", 'warn')
             return []
         c = self.conversations[cid]
         return await c.get_facts()
@@ -128,7 +128,7 @@ class ContextManager:
     
     async def delete_conversation(self, cid):
         if not cid in self.conversations:
-            await log(f"'{cid}' isn't in the registry", 'warn')
+            await Logger.log_async(f"'{cid}' isn't in the registry", 'warn')
             return
         
         async with self.lock:
@@ -137,7 +137,7 @@ class ContextManager:
                 p = c.path
                 await c.save()
                 if not os.path.exists(p):
-                    await log(f"'{cid}'doesn't exist.", 'warn')
+                    await Logger.log_async(f"'{cid}'doesn't exist.", 'warn')
                     return
                 
                 if not c.temp and os.path.exists(c.path):
@@ -172,17 +172,17 @@ class ContextManager:
     async def shut_down(self): 
         await self.save_all()
         await self.cache_manager.shutdown()
-        await log("Context saved and context manager shut down.", "info")
+        await Logger.log_async("Context saved and context manager shut down.", "info")
 
     async def load(self, cid):
         if not cid in self.conversations:
-            await log(f"'{cid}' isn't in the registry", 'warn')
+            await Logger.log_async(f"'{cid}' isn't in the registry", 'warn')
             return
         await self.conversations[cid].load()
 
     async def save(self, cid, path_to_save = None):
         if not cid in self.conversations:
-            await log(f"'{cid}' isn't in the registry", 'warn')
+            await Logger.log_async(f"'{cid}' isn't in the registry", 'warn')
             return
         await self.conversations[cid].save(path_to_save)
 
@@ -240,7 +240,7 @@ class Conversation:
                 self.last_used = content.get('last_used', -1)
 
         except (FileNotFoundError, json.JSONDecodeError):
-            await log("Context missing or corrupted. Starting over.", "warn")
+            await Logger.log_async("Context missing or corrupted. Starting over.", "warn")
             self.messages = [] 
             self.summary = None
             self.facts = None
@@ -250,7 +250,7 @@ class Conversation:
 
     async def save(self, path:str | None = None):
         if self.temp:
-            await log("Temporary conversations cannot be saved", 'warn')
+            await Logger.log_async("Temporary conversations cannot be saved", 'warn')
             return
         try:
             await self.flush_queue()
@@ -262,7 +262,7 @@ class Conversation:
                 await file.write(data_to_save)
 
         except IOError as e:
-            await log(f"Error saving context: {e}", "error")
+            await Logger.log_async(f"Error saving context: {e}", "error")
 
     async def append(self, data:dict | list[dict] | tuple[dict], update:bool = False): 
         if not update:
@@ -278,7 +278,7 @@ class Conversation:
                 async with self.lock: 
                     self.last_used = datetime.datetime.now().timestamp()
             else: 
-                await log("unknown data type, skipping item.", "warn")
+                await Logger.log_async("unknown data type, skipping item.", "warn")
         else:
             if not isinstance(data, (list, tuple)):
                 raise TypeError

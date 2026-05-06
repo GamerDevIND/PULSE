@@ -1,4 +1,4 @@
-from .utils import convert_funcs, log
+from .utils import convert_funcs, Logger
 import inspect 
 import threading
 import asyncio
@@ -122,17 +122,17 @@ class ToolRegistry:
         if tool_name and tool is None: tool = self.tools.get(tool_name)
         if tool_name and tool: 
             if tool_name != tool.name: 
-                await log("Tool and provided tool name do not match. Skipping this item.", "warn")
+                await Logger.log_async("Tool and provided tool name do not match. Skipping this item.", "warn")
                 return {"role": "tool", "tool_name": tool.name, "content": "Tool and provided tool name do not match."}, tool
 
         if not tool:
-           await log("tool not found / provided. skipping execution", "warn")
+           await Logger.log_async("tool not found / provided. skipping execution", "warn")
            return {"role": "tool", "tool_name": "N/A", "content": "Error: Tool not found. Answer directly or request a valid tool"}, tool
 
         error, result = await tool.execute(**kwargs)
 
         if error:
-           await log(f"An error occurred while trying to execute Tool: {tool.name}\nMessage:{result}", "error")
+           await Logger.log_async(f"An error occurred while trying to execute Tool: {tool.name}\nMessage:{result}", "error")
            result = f"An error occurred while trying to execute Tool: {tool.name}\nMessage:{result}"
 
         data = {"role": "tool", "tool_name": tool.name, "content": result}

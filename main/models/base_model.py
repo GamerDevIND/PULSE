@@ -4,7 +4,7 @@ from main.events import EventBus
 from main.tools import Tool
 import inspect
 from typing import Literal, Type
-from main.utils import log
+from main.utils import Logger
 import os
 from io import BytesIO
 import base64
@@ -144,7 +144,7 @@ class Model:
                 tool = Tool(tool, metadata)
                 self.tools.append(tool.schema)
             else:
-                await log(f"No valid type dectected for: {tool}", 'warn')
+                await Logger.log_async(f"No valid type dectected for: {tool}", 'warn')
 
     def set_has_video(self, has_video:bool):
         self.has_video = has_video
@@ -169,14 +169,14 @@ class InputHandler:
         
         ext = os.path.splitext(video_path)[1].lower()
         if ext not in VIDEO_EXTs:
-            await log(f"{video_path} has file extenstion {ext} which isn't supported for video input", 'error')
+            await Logger.log_async(f"{video_path} has file extenstion {ext} which isn't supported for video input", 'error')
             return ERROR_TOKEN, f"{video_path} has file extenstion {ext} which isn't supported for video input"
         
         if await asyncio.to_thread(os.path.getsize, video_path) / 1024**2 <= max_video_size_mbs:
             async with aiofiles.open(video_path, "rb") as video_file:
                 return base64.b64encode(await video_file.read()).decode('utf-8'), None
         
-        await log("Audio processing hasn't been implemented yet.", 'warn')
+        await Logger.log_async("Audio processing hasn't been implemented yet.", 'warn')
         def _helper():
             container = av.open(video_path)
             frames = []
@@ -201,7 +201,7 @@ class InputHandler:
             
         ext = os.path.splitext(image_path)[1].lower()
         if ext not in IMAGE_EXTs:
-            await log(f"{image_path} has file extenstion {ext} which isn't supported for image input", 'error')
+            await Logger.log_async(f"{image_path} has file extenstion {ext} which isn't supported for image input", 'error')
             return ERROR_TOKEN, f"{image_path} has file extenstion {ext} which isn't supported for image input"
         try:
             async with aiofiles.open(image_path, "rb") as image_file:

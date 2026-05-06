@@ -3,7 +3,7 @@ from .models.models_profile import RemoteModel
 import asyncio
 from .tools import ToolRegistry, Tool
 from typing import Iterable
-from .utils import log, strip_thinking
+from .utils import Logger, strip_thinking
 import json
 from copy import deepcopy
 import uuid
@@ -58,7 +58,7 @@ class GenerationSession:
 
     async def generate(self,  stream: bool, user_save_prefix= None, think: str | bool | None = False, image_path: None | str = None,  mod_ = 10, save_thinking= True):
         if image_path and self.model.role != "vision": 
-            await log("Image / Video path provided but no vision model chosen. Aborting...", 'warn')
+            await Logger.log_async("Image / Video path provided but no vision model chosen. Aborting...", 'warn')
 
             if self.state in [GENERATING, TOOLING]:
                 await self.cancel()
@@ -120,7 +120,8 @@ class GenerationSession:
                 tool_names = [t.get('function', {}).get('name', "") for t in tools_chunk] if tools_chunk else []
 
                 yield (thinking_chunk or "", content_chunk or "", tool_names)
-                if self.event_bus: await self.event_bus.parallel_emit(self.event_bus.GENERATION_CHUNK, False, chunk = (thinking_chunk or "", content_chunk or "")) 
+                if self.event_bus: await self.event_bus.parallel_emit(self.event_bus.GENERATION_CHUNK, False,
+                                                                       chunk = (thinking_chunk or "", content_chunk or "")) 
             
             try:
                 await task  
@@ -134,7 +135,7 @@ class GenerationSession:
                                                                                                         system_prompt_override=self.sys_override, options=self.options,
                                                                                                         format_=self.format,  tools_override=self.tools_override):
 
-                await log(f"Got non-streaming response chunk", "info")
+                await Logger.log_async(f"Got non-streaming response chunk", "info")
                 if content_chunk == ERROR_TOKEN:
                     await self.change_state(FAIL)
                     break
@@ -151,7 +152,8 @@ class GenerationSession:
                 tool_names = [t.get('function', {}).get('name', "") for t in tools_chunk] if tools_chunk else []
 
                 yield (thinking_chunk or "", content_chunk or "", tool_names)
-                if self.event_bus: await self.event_bus.parallel_emit(self.event_bus.GENERATION_CHUNK, False, chunk = (thinking_chunk or "", content_chunk or "")) 
+                if self.event_bus: await self.event_bus.parallel_emit(self.event_bus.GENERATION_CHUNK, False, 
+                                                                      chunk = (thinking_chunk or "", content_chunk or "")) 
 
         if self.query and self.query.strip(): 
             async with self.context_lock:
@@ -191,7 +193,7 @@ class GenerationSession:
             if type(result) == str: result = result.lower().strip()
             return result in true_calls
         except Exception as e:
-            await log(f"An error occurred while calling regeneration consent callback: {e}", "warn")
+            await Logger.log_async(f"An error occurred while calling regeneration consent callback: {e}", "warn")
             return False
 
     async def cancel(self):
@@ -237,7 +239,7 @@ class GenerationSession:
         regen = any(t.needs_regeneration for t in tools)
         if regen:
             if self.total_turns >= self.abs_max_turns:
-                await log("Absolute turns limit reached please send a message or reinitiate generation if your UI allows it.", "warn")
+                await Logger.log_async("Absolute turns limit reached please send a message or reinitiate generation if your UI allows it.", "warn")
                 self.turns = 0
                 self.total_turns = 0
                 self.regen = False
@@ -245,7 +247,7 @@ class GenerationSession:
             if self.turns < self.max_turns:
                 self.turns += 1
                 self.total_turns += 1
-                await log("Regenerating...", "info")
+                await Logger.log_async("Regenerating...", "info")
                 self.regen = True
                 return True
             else:
@@ -269,10 +271,10 @@ class GenerationSession:
   
         for tool in tools:  
             if not isinstance(tool, dict) or 'function' not in tool:  
-                await log(f"Invalid tool format: {tool}", "warn")  
+                await Logger.log_async(f"Invalid tool format: {tool}", "warn")  
                 continue  
             func = tool['function']
-            await log(f"Executing tool: {func.get('name')}", "info")      
+            await Logger.log_async(f"Executing tool: {func.get('name')}", "info")      
             tool_name = func.get('name')  
             call_id = tool.get('id')
             c_id = tool.get('call_id')
@@ -286,20 +288,20 @@ class GenerationSession:
                 try:
                     tool_args = json.loads(tool_args)
                 except json.JSONDecodeError:
-                    await log(f"Failed to parse tool arguments for {tool_name}: {tool_args}", "error")
+                    await Logger.log_async(f"Failed to parse tool arguments for {tool_name}: {tool_args}", "error")
                     continue
             
             if not isinstance(tool_args, dict):
-                await log(f"Arguments for {tool_name} are not a dictionary. Skipping...", "warn")
+                await Logger.log_async(f"Arguments for {tool_name} are not a dictionary. Skipping...", "warn")
                 continue
   
             if not tool_name in self.tools_regis.tools.keys():  
-                await log(f"{tool_name} is not in the registory. Skipping...", 'warn')  
+                await Logger.log_async(f"{tool_name} is not in the registory. Skipping...", 'warn')  
                 continue  
   
             result = await self.tools_regis.execute_tool(tool_name=tool_name, **tool_args)
             if result is None:
-                await log(f"An error occured in the tools execution; Tool Name: {tool_name} Skipping...", 'warn')
+                await Logger.log_async(f"An error occured in the tools execution; Tool Name: {tool_name} Skipping...", 'warn')
                 continue
 
             result, tool_obj = result
@@ -312,7 +314,7 @@ class GenerationSession:
                 result["index"] = tool_idx  
 
             if result.get("role") != "tool":
-                await log(f"Invalid tool result role: {result}", "error")
+                await Logger.log_async(f"Invalid tool result role: {result}", "error")
                 continue
 
             results.append(result)  

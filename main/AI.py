@@ -1,6 +1,6 @@
 import asyncio
 from typing import Literal
-from .utils import log
+from .utils import Logger
 from .router import Router
 from .tools import ToolRegistry
 from .models.model_instance import LocalModel, LocalEmbedder
@@ -123,10 +123,10 @@ class AI:
         self.regen_consent_callback = regeneration_consent_callback
         self.mem_save_confirm_callback = mem_save_confirm_callback
 
-        await log("Warming up all models...", "info", append=False)
+        await Logger.log_async("Warming up all models...", "info", append=False)
 
         if not self.backend:
-            await log("No backend provided!", 'error')
+            await Logger.log_async("No backend provided!", 'error')
             return
         
         async with self.lock:
@@ -175,12 +175,12 @@ class AI:
     async def cancel_generation(self, session_id:str):
         await self.event_bus.sequence_emit(self.event_bus.CANCELLING_SESSION, session_id = session_id)
         if not self.backend:
-            await log("No backend provided!", 'error')
+            await Logger.log_async("No backend provided!", 'error')
             raise
         
         await self.backend.cancel_generation(session_id)
             
-        await log('Generation cancelled by user', 'info')
+        await Logger.log_async('Generation cancelled by user', 'info')
 
     async def propose_memory(self, memory: str):
         '''
@@ -203,7 +203,7 @@ class AI:
             return "Rejected: sounds like model self-talk."
 
         if not self.mem_save_confirm_callback:
-            await log("Memory save confirmation callback missing!", "error")
+            await Logger.log_async("Memory save confirmation callback missing!", "error")
             return "Confirmation system not ready. Skipping."
         
         true_calls = [True, 1, "1" ,"true", "y", "yes", "consent", "confirm",]
@@ -264,7 +264,7 @@ class AI:
             """ if facts and "".join(facts).strip() else ''
        
         if summary:
-            context.insert(0, {"role": "assistant", "content": f"""[PERSISTED MEMORY - NOT DIALOGUE]
+            context.insert(0, {"role": "assistant", "content": f"""[PERSISTED MEMORY - NOT DIALogger.log_asyncUE]
                 [INTERNAL MEMORY - DO NOT REPEAT - NOT PART OF CONVERSATION]
 
                 The system generated summary of previous messages/turns. **Do NOT** treat this as the part of the conversation. For reference only. 
@@ -278,7 +278,7 @@ class AI:
             
         if use_memory:
             if not self.RAG_Manager:
-                await log("RAG manager not set for the instance!", 'error')
+                await Logger.log_async("RAG manager not set for the instance!", 'error')
                 return context, query
             
             async with self.lock:
@@ -289,7 +289,7 @@ class AI:
 
             if rag_results:
                 scores = [r["score"] for r in rag_results]
-                await log(f"RAG: {len(rag_results)} chunks, scores {min(scores):.3f}–{max(scores):.3f}, avg {sum(scores)/len(scores):.3f}", 'info')
+                await Logger.log_async(f"RAG: {len(rag_results)} chunks, scores {min(scores):.3f}–{max(scores):.3f}, avg {sum(scores)/len(scores):.3f}", 'info')
                 current_chars = 0
                 rag_text = ""
                 for r in rag_results:
@@ -325,7 +325,7 @@ class AI:
     async def create_generation(self, query, cid= None, stream: None | bool = None, manual_routing=False, think=None, file_path=None, video_frames_mod= 10, 
                                 user_save_prefix = None, save_thinking = True, options = None, format_: dict | None = None, use_memory = True):
         if not self.backend:
-            await log("No backend provided!", 'error')
+            await Logger.log_async("No backend provided!", 'error')
             raise
 
         await self.event_bus.sequence_emit(self.event_bus.CREATING_SESSION)
@@ -333,14 +333,14 @@ class AI:
             cid = cid or self.last_cid
 
         if not cid:
-            await log(f"conversation for '{cid}' not found, creating a new conversation...", 'warn')
+            await Logger.log_async(f"conversation for '{cid}' not found, creating a new conversation...", 'warn')
             c = await self.context_manager.new_conversation()
             cid = c.id
 
         c = self.context_manager.conversations.get(cid)
 
         if not c:
-            await log(f"conversation for '{cid}' not found, creating a new conversation...", 'warn')
+            await Logger.log_async(f"conversation for '{cid}' not found, creating a new conversation...", 'warn')
             c = await self.context_manager.new_conversation()
             async with self.lock:
                 self.last_cid = c.id
@@ -367,7 +367,7 @@ class AI:
         role = "chat" if role == "chaos" else role
         model = self.backend.get_model(role)
         if not model:
-            await log(f"No model found for role: {role} in {self.mode} mode!", 'error')
+            await Logger.log_async(f"No model found for role: {role} in {self.mode} mode!", 'error')
             return
             
         if stream is None:
@@ -387,7 +387,7 @@ class AI:
             self.status = {"status": "Generating session", 'message': ""}
                 
 
-        await log('Generating session...', 'info')
+        await Logger.log_async('Generating session...', 'info')
             
         sid, session = await self.backend.create_session(query, context, self.tools_regis, role, system, options, format_,
                                                          self.max_turns, self.abs_max_turns, self.regen_consent_callback)
@@ -403,7 +403,7 @@ class AI:
         return gen
 
     async def shut_down(self):
-        await log("Shutting Down all services...", "info")
+        await Logger.log_async("Shutting Down all services...", "info")
         await self.event_bus.parallel_emit(self.event_bus.SHUTTING_DOWN)
         async with self.lock:
             self.status = {"status": "Shutting down", "message": ""}
@@ -420,11 +420,11 @@ class AI:
         if self.backend:
             await self.backend.shutdown()
         else:
-            await log("No backend provided! Skipping backend shutdown.", 'error')
+            await Logger.log_async("No backend provided! Skipping backend shutdown.", 'error')
         
         await self.event_bus.parallel_emit(self.event_bus.SHUTDOWN)
 
-        await log("Full System Offline.", "success")
+        await Logger.log_async("Full System Offline.", "success")
         
         await asyncio.sleep(1.0)
 

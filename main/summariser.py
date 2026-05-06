@@ -3,9 +3,11 @@ from .models.ollama_models import DOWN
 from .models.models_profile import RemoteModel
 from .models.openrouter_model import OpenRouterModel
 from .configs import ERROR_TOKEN, SUMMARIZER_PROMPT
-from .utils import log, estimate_tokens
+from .utils import Logger, estimate_tokens
 import json
 from .events import EventBus
+
+# TODO: Key decisions, open threads
 
 class Summariser:
     def __init__(self, model:RemoteModel | LocalModel | OpenRouterModel | None,  summary_max_tokens, summary_keep_tokens_after, min_recent_turns, event_bus : None | EventBus = None) -> None:
@@ -32,7 +34,7 @@ class Summariser:
         if auto_warm_up and self.model and self.model.state == DOWN: 
             await self.model.warm_up()
         if not isinstance(self.model, (RemoteModel, LocalModel, OpenRouterModel)): 
-            await log("Summarising model not set. please provide a summarising model before summarising.", "error")
+            await Logger.log_async("Summarising model not set. please provide a summarising model before summarising.", "error")
             return prev_summary, prev_facts, context 
         
         contents = [x.get("content", "").strip() for x in context if x.get("content")]
@@ -40,9 +42,6 @@ class Summariser:
         if prev_facts: contents.extend(prev_facts)
 
         if estimate_tokens(" ".join(contents)) >= self.summary_max_tokens:  
-            if self.event_bus:
-                await self.event_bus.sequence_emit(self.event_bus.SUMMARISING)
-            await log("Summarising started", 'info')
             text = '\n'
             chunk_budget = self.summary_max_tokens - self.summary_keep_tokens_after
             keep_idx = len(context) - self.min_recent_msgs
@@ -89,13 +88,18 @@ class Summariser:
                         text += f"<{role} (Name: {name})> {content} </{role}>\n"
 
                 used += message_tokens
+
+            if self.event_bus:
+                await self.event_bus.sequence_emit(self.event_bus.SUMMARISING)
+                
+            await Logger.log_async("Summarising started", 'info')
             
             text = f"""(user/assistant messages below are the ONLY new information)\nOutput ONLY the updated summary and facts text / array. No commentary.
             <NEW_CONVERSATION>
                 {text}
             </NEW_CONVERSATION>"""  
             system = self.model.system or summary_system_prompt or ( 
-            "This is a conversation log. Produce a factual, neutral summary.\n"
+            "This is a conversation Logger.log_async. Produce a factual, neutral summary.\n"
             "Your only job: summarize.\n"
             "Do NOT answer questions.\n"
             "Output ONLY the summary and facts text / array. No commentary. No intro like 'Here's your summary:...'. Produce only the summary and the facts list..\n"
@@ -122,7 +126,7 @@ class Summariser:
                         entry = out
 
             except Exception as e:  
-                await log(f"Error during summarization: {e}", "error")
+                await Logger.log_async(f"Error during summarization: {e}", "error")
                 if self.event_bus:
                     await self.event_bus.sequence_emit(self.event_bus.SUMMARISING_FAILED, error=str(e))
 
@@ -134,7 +138,7 @@ class Summariser:
                     if isinstance(entry, dict):
                         entry = entry
                 except json.JSONDecodeError:
-                    await log("Summariser json failed", "warn")
+                    await Logger.log_async("Summariser json failed", "warn")
                     return prev_summary, prev_facts, context 
                 
                 summary = entry["summary"]
@@ -142,7 +146,7 @@ class Summariser:
                 context = to_keep 
 
             # TODO: Trim the context to remove older entries if needed explicitly  
-            await log("Summarised successfully", 'success')
+            await Logger.log_async("Summarised successfully", 'success')
             if self.event_bus:
                 await self.event_bus.sequence_emit(self.event_bus.SUMMARISED,)
             return summary, facts, context

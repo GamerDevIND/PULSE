@@ -1,5 +1,5 @@
 from .ollama_models import OllamaModel, DOWN, BUSY, SHUTTING_DOWN, IDLE, OllamaEmbedder
-from main.utils import log
+from main.utils import Logger
 from main.resource_manager import SessionManager
 
 class RemoteModel(OllamaModel):
@@ -23,7 +23,7 @@ class RemoteModel(OllamaModel):
 
     async def generate(self, query: str | None, context: list[dict], stream: bool, think: str | bool | None = False, file_path: None | str = None, 
                    mod_ = 10, system_prompt_override: str | None = None, options: dict | None = None, format_: dict | None = None,  tools_override:None | list = None):
-        await log(f"Generating response from {self.name}...", "info")
+        await Logger.log_async(f"Generating response from {self.name}...", "info")
         await self.change_state(BUSY)
         async for chunk in self._generator(query, context, stream, think, file_path, mod_, 
                                            system_prompt_override=system_prompt_override, options = options, format_ = format_, tools_override=tools_override):
@@ -31,7 +31,7 @@ class RemoteModel(OllamaModel):
         await self.change_state(IDLE)
 
     async def shutdown(self):
-        await log(f"Shutting down {self.name}...", "info")
+        await Logger.log_async(f"Shutting down {self.name}...", "info")
         await self.change_state(SHUTTING_DOWN)
         if self.event_bus: await self.event_bus.parallel_emit(self.event_bus.INFO, msg = f"Shutting down model: {self.name} ({self.model_name})")
         url = f'{self.host}{self._get_endpoint()}'
@@ -47,7 +47,7 @@ class RemoteModel(OllamaModel):
         if self.warmed_up:
             await self.resource_manager.shutdown(True, url, headers, payload, True,)
             
-        await log(F"{self.name} shutting down success", 'info')
+        await Logger.log_async(F"{self.name} shutting down success", 'info')
         await self.change_state(DOWN)
         if self.event_bus: await self.event_bus.parallel_emit(self.event_bus.INFO, msg = f"Model shutdown: {self.name} ({self.model_name})")
 
@@ -63,7 +63,7 @@ class RemoteEmbedder(OllamaEmbedder):
             await self.change_state(IDLE)
 
     async def shutdown(self):
-        await log(f"Shutting down {self.name}...", "info")
+        await Logger.log_async(f"Shutting down {self.name}...", "info")
         await self.change_state(SHUTTING_DOWN)
         if self.event_bus: await self.event_bus.parallel_emit(self.event_bus.INFO, msg = f"Shutting down model: {self.name} ({self.model_name})")
         url = f'{self.host}{self._get_endpoint()}'
@@ -77,6 +77,6 @@ class RemoteEmbedder(OllamaEmbedder):
             'options': {'keep_alive': 0}
         }
         await self.resource_manager.shutdown(True, url, headers, payload, True,)
-        await log(F"{self.name} shutting down success", 'info')
+        await Logger.log_async(F"{self.name} shutting down success", 'info')
         await self.change_state(DOWN)
         if self.event_bus: await self.event_bus.parallel_emit(self.event_bus.INFO, msg = f"Model shutdown: {self.name} ({self.model_name})")

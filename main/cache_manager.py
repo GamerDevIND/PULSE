@@ -6,7 +6,7 @@ import aiofiles
 import shutil
 import datetime
 from .configs import IMAGE_EXTs, VIDEO_EXTs, FILE_NAME_KEY
-from .utils import log
+from .utils import Logger
 from copy import deepcopy
 from .events import EventBus
 
@@ -68,7 +68,7 @@ class GarbageCollector:
                     await asyncio.to_thread(os.remove, index[k]['path'])
                     current_size -= index[k]['size']
                     del index[k]
-                except Exception as e: await log(f"Error deleting: {index[k]['path']}: {repr(e)}", "error")
+                except Exception as e: await Logger.log_async(f"Error deleting: {index[k]['path']}: {repr(e)}", "error")
         if self.event_bus:
             await self.event_bus.sequence_emit(self.event_bus.GARBAGE_COLLECTED)
         return index
@@ -129,7 +129,7 @@ class CacheManager:
     
     async def cache_file(self, file_path:str, skip_if_missing = True):
         if not (file_path and os.path.exists(file_path)):
-            await log(F"{file_path} doesn't exist!", 'error')
+            await Logger.log_async(F"{file_path} doesn't exist!", 'error')
             if skip_if_missing:
                 return
             else:
@@ -144,24 +144,24 @@ class CacheManager:
         elif ext in VIDEO_EXTs:
             dest = self.videos_dir
         else:
-            await log(F"{file_path} isn't a supported format!", 'error')
+            await Logger.log_async(F"{file_path} isn't a supported format!", 'error')
             if skip_if_missing:
                 return
             else:
                 raise FileNotFoundError(f"{file_path} isn't a supported format!")
         
         if not dest:
-            await log(f"An error occurred processing the filename of {file_path}", 'error')
+            await Logger.log_async(f"An error occurred processing the filename of {file_path}", 'error')
             return
         
         try:
             hashed = await asyncio.to_thread(self._hash_file, file_path)
         except Exception as e:
-            await log(f"An error occurred while hashing: {repr(e)}", 'error')
+            await Logger.log_async(f"An error occurred while hashing: {repr(e)}", 'error')
             hashed = None
 
         if not hashed:
-            await log(f"Hashing for {file_path} failed.", 'error')
+            await Logger.log_async(f"Hashing for {file_path} failed.", 'error')
             if skip_if_missing:
                 return
             else:
@@ -212,11 +212,11 @@ class CacheManager:
         try:
             hashed = await asyncio.to_thread(self._hash_file, file_path)
         except Exception as e:
-            await log(f"An error occurred while hashing: {repr(e)}", 'error')
+            await Logger.log_async(f"An error occurred while hashing: {repr(e)}", 'error')
             hashed = None
 
         if not hashed:
-            await log(f"Hashing for {file_path} failed.", 'error')
+            await Logger.log_async(f"Hashing for {file_path} failed.", 'error')
             raise Exception(f"Hashing for {file_path} failed.")
 
         async with self.lock:
@@ -242,7 +242,7 @@ class CacheManager:
                 content = json.loads(content)
                 self.cache_index = content
         except (FileNotFoundError, json.JSONDecodeError):
-            await log("Cache index missing or corrupted. Starting over.", "warn")
+            await Logger.log_async("Cache index missing or corrupted. Starting over.", "warn")
             self.cache_index = {}
 
     async def shutdown(self):

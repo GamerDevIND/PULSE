@@ -1,6 +1,6 @@
 import json
 from main.tools import Tool
-from main.utils import log
+from main.utils import Logger
 from main.models.models_profile import RemoteModel as Model, OllamaEmbedder as Embedder
 from .backend import Backend
 from main.resource_manager import ResourceManager
@@ -38,21 +38,21 @@ class SingleServer(Backend):
         await self._async_load(Model, Embedder, True, self.ollama_port, auto_resolve_ports)
 
     async def init(self, tools_list:list[Tool]):    
-        await log("Initiating...", "info")
+        await Logger.log_async("Initiating...", "info")
         if all(m.warmed_up for m in self.models.values()) and self.resource_manager.process and self.resource_manager.process.poll() is None:
-            await log(
+            await Logger.log_async(
                     f"Backend process already running and warmed. Skipping restart.",
                     "success",
             )
         else: 
             self.resource_manager.create_process(self.start_command, self.ollama_env)
 
-        await log("Loading all models...", 'info')
+        await Logger.log_async("Loading all models...", 'info')
 
         await self._init(*tools_list)
     
     async def shutdown(self):
-        await log(f"Shutting down Single Server...", "info")
+        await Logger.log_async(f"Shutting down Single Server...", "info")
         for m in self.models.values():
             await m.shutdown()
 
@@ -60,4 +60,4 @@ class SingleServer(Backend):
 
         await self.resource_manager.shutdown(process_cleanup=True, set_session_to_None=True)
 
-        await log(f"Single Server shutdown complete.", "success")
+        await Logger.log_async(f"Single Server shutdown complete.", "success")

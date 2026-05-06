@@ -1,4 +1,4 @@
-from .utils import log
+from .utils import Logger
 import inspect
 import asyncio
 import threading
@@ -35,59 +35,95 @@ class EventBus:
     WARN = "warn"
     WARNING = "warn"
     ERROR = "error"
+    SUCCESS = "success"
 
     def  __init__(self) -> None:
         self.listeners:dict[str, set] = {}
-        self._lock = threading.RLock()
+        self._lock_sync = threading.RLock()
+        self._lock_async = asyncio.Lock()
+        self.wild_listeners = set()
 
     def add_listener(self, event_name:str, listener):
-        print(f"Adding {listener.__name__} to event '{event_name}'")
-        with self._lock:
-            if not self.listeners.get(event_name):
-                self.listeners[event_name] = {listener}
+        Logger.log_sync(f"Adding {listener.__name__} to event '{event_name}'", 'info')
+        with self._lock_sync:
+            if event_name == '*':
+                if not listener.__name__ in self.wild_listeners:
+                    self.wild_listeners.add(listener)
             else:
-                self.listeners[event_name].add(listener)
+                if not self.listeners.get(event_name):
+                    self.listeners[event_name] = {listener}
+                else:
+                    self.listeners[event_name].add(listener)
 
     def remove_listener(self, event_name:str, listener):
-        print(f"Removing {listener.__name__} from event '{event_name}'")
-        with self._lock:
-            l = self.listeners.get(event_name)
-            if not l:
-                print(f"{listener.__name__} doesn't exist for event '{event_name}'", 'warn')
-                return
-            
-            self.listeners[event_name].discard(listener)
-            if len(self.listeners[event_name]) < 1:
-                del self.listeners[event_name]
+        Logger.log_sync(f"Adding {listener.__name__} to event '{event_name}'", 'info')
+        with self._lock_sync:
+            if event_name == '*':
+                self.wild_listeners.discard(listener)
+            else:
+                l = self.listeners.get(event_name)
+                if not l:
+                    print(f"{listener.__name__} doesn't exist for event '{event_name}'", 'warn')
+                    return
+                
+                self.listeners[event_name].discard(listener)
+                if len(self.listeners[event_name]) < 1:
+                    del self.listeners[event_name]
 
-    async def sequence_emit(self, event_name,should_log = True, **event):
-        if should_log: await log(f"Event '{event_name}' emitted with parameter(s): {event}; Timestamp: {datetime.now().isoformat()}", 'info')
-        with self._lock:
+    async def sequence_emit(self, event_name, should_log = True, **event):
+        if should_log: await Logger.log_async(f"Event '{event_name}' emitted with parameter(s): {event}; Timestamp: {datetime.now().isoformat()}", 'info')
+
+        async with self._lock_async:
+            listeners = list(self.wild_listeners)
+
+        for l in listeners:
+            try:
+                ev = event.copy()
+                ev['event_name'] = event_name
+                f = l(**ev)
+                if inspect.isawaitable(f):
+                    await f
+            except Exception as e:
+                await Logger.log_async(f"'{event_name}' tried to call function: '{l.__name__}' with {ev}. Error: {repr(e)}. Skipping...", 'warn')
+
+        async with self._lock_async:
             listeners = self.listeners.get(event_name, set())
+            
         for listener in list(listeners):
             try:
                 f = listener(**event)
                 if inspect.isawaitable(f):
                     await f
             except Exception as e:
-                await log(f"'{event_name}' tried to call function: '{listener.__name__}' with {event}. Error: {repr(e)}. Skipping...", 'warn')
+                await Logger.log_async(f"'{event_name}' tried to call function: '{listener.__name__}' with {event}. Error: {repr(e)}. Skipping...", 'warn')
 
-    async def parallel_emit(self, event_name,should_log = True, **event):
-        if should_log: await log(f"Event '{event_name}' emitted with parameter(s): {event}; Timestamp: {datetime.now().isoformat()}", 'info')
-        with self._lock:
-            listeners = self.listeners.get(event_name, set())
-        l = []
-        for listener in list(listeners):
+    async def parallel_emit(self, event_name, should_log= True, **event):
+        if should_log: await Logger.log_async(f"Event '{event_name}' emitted with parameter(s): {event}; Timestamp: {datetime.now().isoformat()}", 'info')
+
+        tasks = []
+
+        async with self._lock_async:
+            wild = list(self.wild_listeners)
+            specific = list(self.listeners.get(event_name, set()))
+
+        if wild:
+            wild_payload = {**event, 'event_name': event_name}
+            for listener in wild:
+                if inspect.iscoroutinefunction(listener):
+                    tasks.append(listener(**wild_payload))
+                else:
+                    tasks.append(asyncio.to_thread(listener, **wild_payload))
+
+        for listener in specific:
             if inspect.iscoroutinefunction(listener):
-                l.append(listener(**event))
+                tasks.append(listener(**event))
             else:
-                t = asyncio.to_thread(listener, **event)
-                l.append(t)
+                tasks.append(asyncio.to_thread(listener, **event))
 
-        if not l: return
+        if not tasks: return
 
-        results = await asyncio.gather(*l, return_exceptions=True)
+        results = await asyncio.gather(*tasks, return_exceptions=True)
         for r in results:
             if isinstance(r, asyncio.CancelledError): raise r
             if isinstance(r, Exception):
-                await log(f"'{event_name}' error: {repr(r)}. Skipping...", 'warn')
+                await Logger.log_async(f"'{event_name}' error: {repr(r)}. Skipping...", 'warn')

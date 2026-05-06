@@ -2,7 +2,7 @@ import aiofiles
 import os
 import pymupdf
 import asyncio
-from main.utils import log
+from main.utils import Logger
 
 async def read_txt(file_path:str):
     async with aiofiles.open(file_path, "r", encoding = "utf-8") as f:
@@ -23,7 +23,7 @@ async def read_pdf(file_path:str):
     text = await asyncio.to_thread(read_docs)
 
     if not text.strip():
-        await log('Text not found, returning empty.', 'warn')
+        await Logger.log_async('Text not found, returning empty.', 'warn')
 
     return text
 

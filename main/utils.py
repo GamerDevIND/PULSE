@@ -6,25 +6,47 @@ from typing import Any, get_origin, get_args, Union, List, Dict, Literal
 from weakref import WeakKeyDictionary
 from copy import deepcopy
 import re
+import threading
+import asyncio
 
-async def log(message: str, level, append = True, stdout = True):
+class Logger:
     log_dir = os.path.join( "main", "logs")
     os.makedirs(log_dir, exist_ok=True)
-    timestamp = datetime.now().strftime(" %H:%M:%S - %d / %m / %Y ")
-    emoji = {
-        "info": "ℹ️",
-        "warn": "⚠️",
-        "error": "🟥",
-        "success": "✅"
-    }.get(level, "")
-    text = f"{emoji} [{level}] {message} - [{timestamp}]\n"
     log_file = os.path.join(log_dir, 'log.log')
-    if not os.path.exists(log_file): 
-        async with aiofiles.open(log_file, "w") as f: 
-            pass 
-    async with aiofiles.open(log_file, "a" if  append else "w", encoding='utf-8') as f:
-        if stdout: print(text)
-        await f.write(text)
+    _lock_sync = threading.RLock()
+    _lock_async = asyncio.Lock()
+
+    @classmethod
+    def _format_message(cls, message: str, level: str) -> str:
+        timestamp = datetime.now().strftime(" %H:%M:%S - %d / %m / %Y ")
+        emoji = {
+            "info": "ℹ️",
+            "warn": "⚠️",
+            "error": "🟥",
+            "success": "✅"
+        }.get(level.lower(), "📋")
+        return f"{emoji} [{level.upper()}] {message} - [{timestamp}]\n"
+
+    @classmethod
+    def log_sync(cls, message: str, level, append = True, stdout = True):
+        text = cls._format_message(message, level)
+        with cls._lock_sync:
+            if not os.path.exists(cls.log_file): 
+                with open(cls.log_file, "w") as f:
+                    pass 
+            with open(cls.log_file, "a" if  append else "w", encoding='utf-8') as f:
+                if stdout: print(text)
+                f.write(text)
+    @classmethod
+    async def log_async(cls, message: str, level, append = True, stdout = True):
+        text = cls._format_message(message, level)
+        async with cls._lock_async:
+            if not os.path.exists(cls.log_file): 
+                async with aiofiles.open(cls.log_file, "w") as f:
+                    pass 
+            async with aiofiles.open(cls.log_file, "a" if  append else "w", encoding='utf-8')as f: 
+                if stdout: print(text)
+                await f.write(text)
 
 def estimate_tokens(text:str):
     return len(text) / 3.5
