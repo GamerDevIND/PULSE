@@ -131,6 +131,7 @@ Use the new `setup.py` for faster setup, it's still under development so expect 
         "has_tools": false, 
         "has_CoT": false, 
         "has_vision": false,
+        "has_audio":false,
         "port":11434
        
     },
@@ -140,6 +141,7 @@ Use the new `setup.py` for faster setup, it's still under development so expect 
         "model_name": "deepseek-r1:7b",
         "has_tools": true,
         "has_CoT":true,
+        "has_audio":false,
         "has_vision": false,
         "port": 13345
         
@@ -150,6 +152,7 @@ Use the new `setup.py` for faster setup, it's still under development so expect 
         "model_name":"smollm2:135m",
         "has_tools": true,
         "has_CoT": false,
+        "has_audio":false,
         "has_vision": false,
         "port": 11435
         
@@ -161,6 +164,7 @@ Use the new `setup.py` for faster setup, it's still under development so expect 
         "has_tools": false,
         "has_CoT": false,
         "has_vision": true,
+        "has_audio":false,
         "port": 11543
        
     },
@@ -189,6 +193,7 @@ For example the entry might look like
     "has_tools": true,
     "has_CoT": true,
     "has_vision": false,
+    "has_audio":false,
     "api_key": "$OPENROUTER_KEY"
 }
 ```
