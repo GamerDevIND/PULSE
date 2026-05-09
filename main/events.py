@@ -47,7 +47,7 @@ class EventBus:
         Logger.log_sync(f"Adding {listener.__name__} to event '{event_name}'", 'info')
         with self._lock_sync:
             if event_name == '*':
-                if not listener.__name__ in self.wild_listeners:
+                if not listener in self.wild_listeners:
                     self.wild_listeners.add(listener)
             else:
                 if not self.listeners.get(event_name):
@@ -65,7 +65,7 @@ class EventBus:
                 if not l:
                     print(f"{listener.__name__} doesn't exist for event '{event_name}'", 'warn')
                     return
-                
+
                 self.listeners[event_name].discard(listener)
                 if len(self.listeners[event_name]) < 1:
                     del self.listeners[event_name]
@@ -88,7 +88,7 @@ class EventBus:
 
         async with self._lock_async:
             listeners = self.listeners.get(event_name, set())
-            
+
         for listener in list(listeners):
             try:
                 f = listener(**event)
