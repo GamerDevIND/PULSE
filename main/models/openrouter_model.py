@@ -8,6 +8,7 @@ from main.utils import Logger, strip_thinking
 from main.configs import IMAGE_EXTs, VIDEO_EXTs, AUDIO_EXTs, ERROR_TOKEN
 from copy import deepcopy
 import os
+import traceback
 
 DOWN = "down"
 IDLE = "idle"
@@ -68,7 +69,7 @@ class OpenRouterModel(Model):
         try:
             return await self.input_handler.encode_frames_from_vid(video_path, self.url_media_valid, mod_, format_, 5)
         except Exception as e:
-            await Logger.log_async(f"Error in video frame encoding for {self.name}: {e}", 'error')
+            await Logger.log_async(f"Error in video frame encoding for {self.name}: {e}; {traceback.format_exc()}", 'error')
             return ERROR_TOKEN, repr(e)
     
     async def _encode_image(self, image_path):
@@ -94,7 +95,8 @@ class OpenRouterModel(Model):
             if ext in IMAGE_EXTs:
                 image, e = await self._encode_image(image_path=file_path)
                 if image == ERROR_TOKEN:
-                    await Logger.log_async(f"Error encoding image! Skipping: {repr(e)}", 'error')
+                    await Logger.log_async(f"Error encoding image! Skipping: {repr(e)}",'error')
+                    if self.event_bus: await self.event_bus.sequence_emit(self.event_bus.ERROR, msg = f"Error encoding image! Skipping: {repr(e)}",)
                 else:
                     data_url = f"data:image/jpeg;base64,{image}"
                     d = data['messages'][-1].get('content', [])
@@ -112,6 +114,7 @@ class OpenRouterModel(Model):
                 frames, e = await self._encode_frames_from_vid(video_path=file_path, mod_= mod_, format_=video_save_buffer_format)
                 if frames == ERROR_TOKEN:
                     await Logger.log_async(f"Error encoding video! Skipping: {repr(e)}", 'error')
+                    if self.event_bus: await self.event_bus.sequence_emit(self.event_bus.ERROR, msg = f"Error encoding video! Skipping: {repr(e)}",)
 
                 else:
 
@@ -150,7 +153,8 @@ class OpenRouterModel(Model):
                 audio, e = await self._encode_audio(audio_path=file_path)
 
                 if audio  == ERROR_TOKEN:
-                    await Logger.log_async(f"Error encoding Audio! Skipping: {repr(e)}", 'error')
+                    await Logger.log_async(f"Error encoding audio! Skipping: {repr(e)}", 'error')
+                    if self.event_bus: await self.event_bus.sequence_emit(self.event_bus.ERROR, msg = f"Error encoding audio! Skipping: {repr(e)}",)
                 else:
                     d = data['messages'][-1]['content'] 
                     
@@ -218,6 +222,7 @@ class OpenRouterModel(Model):
                 if response.status != 200:
                     error_data = await response.json()
                     await Logger.log_async(f"Error during generation of {self.name}: {error_data['error']['message']}", 'error')
+                    if self.event_bus: await self.event_bus.sequence_emit(self.event_bus.ERROR, msg = f"Error during generation of {self.name}: {error_data['error']['message']}")
                     yield (ERROR_TOKEN, ERROR_TOKEN, [])
                     return
                 
@@ -248,6 +253,7 @@ class OpenRouterModel(Model):
 
                                     if "error" in json_line:
                                         await Logger.log_async(f"Error during generation of {self.name}: {json_line['error']['message']}", 'error')
+                                        if self.event_bus: await self.event_bus.sequence_emit(self.event_bus.ERROR, msg = f"Error during generation of {self.name}: {json_line['error']['message']}")
                                         yield (ERROR_TOKEN, ERROR_TOKEN, [])
                                         await self.change_state(IDLE)
                                         return
@@ -404,7 +410,7 @@ class OpenRouterEmbedder(Model):
             return
 
         except Exception as e:
-            await Logger.log_async(f"Openrouter API Request Error: {e}", "error")
+            await Logger.log_async(f"Openrouter API Request Error: {e}; {traceback.format_exc()}", "error")
             if self.event_bus: await self.event_bus.parallel_emit(self.event_bus.ERROR, msg = f"Openrouter API Request Error: {e}")
             return (ERROR_TOKEN)
         

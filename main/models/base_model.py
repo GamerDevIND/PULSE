@@ -123,28 +123,32 @@ class Model:
         return out
     
     async def add_tools(self, *tool_dicts):
+        if not getattr(self, 'has_tools', True):
+            await Logger.log_async(f"{self.name} ({self.model_name}) [{self.role}] doesn't have tool support, skipping...", 'warn')
+            return
+
         for tool in tool_dicts:
             if isinstance(tool, Tool):
                 self.tools.append(tool.schema)
             elif isinstance(tool, dict):
                 self.tools.append(tool)
             elif callable(tool) and not inspect.isclass(tool):
-                needs_regeneration:bool = False
-                retry: Literal["none", "always", ] = "none"
+                needs_regeneration: bool = False
+                retry: Literal["none", "always"] = "none"
                 max_retries: int = 0
                 retry_on: tuple[Type[Exception], ...] | None = None
-                visible_to_user: bool = True
+                timeout: float | Literal['inf'] = 'inf'
                 metadata = {
                     "needs_regeneration": needs_regeneration,
                     "retry": retry,
                     "max_retries": max_retries,
                     "retry_on": retry_on or (),
-                    "visible_to_user": visible_to_user,
+                    "timeout": timeout,
                 }
                 tool = Tool(tool, metadata)
                 self.tools.append(tool.schema)
             else:
-                await Logger.log_async(f"No valid type dectected for: {tool}", 'warn')
+                await Logger.log_async(f"No valid type detected for: {tool}", 'warn')
 
     def set_has_video(self, has_video:bool):
         self.has_video = has_video

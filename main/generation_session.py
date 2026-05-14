@@ -11,6 +11,7 @@ import datetime
 import inspect
 from .configs import ERROR_TOKEN, FILE_NAME_KEY, INSTANT_TOOL_EXEC
 from .events import EventBus
+import traceback
 
 CREATED = "CREATED"
 DONE = "DONE"
@@ -193,7 +194,7 @@ class GenerationSession:
             if type(result) == str: result = result.lower().strip()
             return result in true_calls
         except Exception as e:
-            await Logger.log_async(f"An error occurred while calling regeneration consent callback: {e}", "warn")
+            await Logger.log_async(f"An error occurred while calling regeneration consent callback: {e}; {traceback.format_exc()}", "warn")
             return False
 
     async def cancel(self):
@@ -233,7 +234,9 @@ class GenerationSession:
         while True:
             async for (thinking, response, tool) in self.generate(stream, user_save_prefix, think, file_path, mod_, True): 
                 yield thinking, response, tool
-            if not self.regen: break
+
+            if not self.regen: 
+                break
 
     async def _check_regen(self, tools:Iterable[Tool]):
         regen = any(t.needs_regeneration for t in tools)

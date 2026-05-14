@@ -4,42 +4,80 @@ from .models.models_profile import RemoteModel
 from .models.openrouter_model import OpenRouterModel
 from .configs import ERROR_TOKEN, SUMMARIZER_PROMPT
 from .utils import Logger, estimate_tokens
+import traceback
+import re
 import json
 from .events import EventBus
 
 # TODO: Key decisions, open threads
 
+TURNS_TO_MSG_MULTIPLIER = 2.5
+
 class Summariser:
     def __init__(self, model:RemoteModel | LocalModel | OpenRouterModel | None,  summary_max_tokens, summary_keep_tokens_after, min_recent_turns, event_bus : None | EventBus = None) -> None:
         self.summary_max_tokens = summary_max_tokens
         self.summary_keep_tokens_after = summary_keep_tokens_after
-        self.min_recent_msgs = min_recent_turns * 2
+        self.min_recent_msgs = int(round(min_recent_turns * TURNS_TO_MSG_MULTIPLIER))
         self.model = model
         self.format = {
             "type": "object",
             "properties": {
-            "summary": {"type": "string", "description": "The detailed summary of the given conversation and potiential previous summary for narrative continuity. Make it machine parsable."},
+            "summary": {"type": "string", "description": "The detailed summary of the given conversation and potiential previous summary for narrative continuity. \n"
+            "Make it machine parsable. Preserve the specific / explicit details and references "},
             "facts": {"type": "array", "items": {"type": "string"}, "description": """
-                      The facts about the user retrieved from the given conversation and potiential previous summary. For persona modeling. Never self narrate. 
+                      The facts about the user retrieved from the given conversation and potiential previous summary. For persona modeling. Preserve specific details if needed.
+                      Preserve specific references and explicitly stated facts if proven needed for future conversation flow. Never self narrate. 
                       Retrieve only facts explictly stated. Make it machine parsable. NEVER reflect your system in these responses, follow the system, don't narrate.
                       Keep each item short and to the point, you're allowed to generated multiple COMPLETE facts.""".strip()},
+            "key_decisions": {"type": "array", "items": {"type": "string"}, "description": '''
+                      The key decisions taken during the conversation discussion, which might be relevant for later references, or be relevant for shaping the conversation flow.
+                      Preserve long term decisions over short term choices. Make sure to extract the key decisions during the conversation flow. Keep finalized choices, architectural directions, or preferences that override defaults. 
+                      Focus on 'the what' and 'the why'. (e.g. [do not treat this as the part of the conversation]: 'User opted for SQLite to maintain local-first portability'). Avoid transient choices.
+                      If a new decision EXPLICTLY contradicts or updates a previous one, replace the old entry to maintain a single source of truth. Prioritize technical constraints and user-defined 'Hard Rules'.
+                      Strictly deduplicate. If the current decision is a refinement of a previous one, merge them into a single concise bullet point. Avoid decision bloat (keeping copies of the same decisions),
+                      Internally distinguish between 'Explicit' (User said: 'Use X') and 'Inferred' (User followed a path implying Y). Prioritize Explicit decisions. IF no decison is taken, return an empty array. 
+                    '''.strip()},
+            "open_threads": {"type": "array", "items": {"type": "string"}, "description": '''
+                      List unresolved problems, pending tasks, or 'to-be-decided' items.  Focus on roadblocks or questions the user hasn't answered yet. (e.g., 'Need to determine the encryption method for local DB'). 
+                      Remove an item once is solved (expictly stated by user, or tool). Preserve ongoing open and unresolved discussion, issues or threads. 
+                      Priotise long term threads over short term one time. List ONLY currently active unresolved problems. When a thread is resolved in the new conversation, it MUST be removed. 
+                      Do not carry over completed tasks. IF no threads remain, return an empty array.
+                            '''.strip()}
 
             },
-            "required": ["summary", "facts",]
-          }
+            "required": ["summary", "facts", "key_decisions", 'open_threads', ]
+        }
         
         self.event_bus = event_bus
 
-    async def maybe_summarise_context(self, context, prev_summary : None | str = None, prev_facts : None | list[str] = None, summary_system_prompt = SUMMARIZER_PROMPT, auto_warm_up = False):
+    async def maybe_summarise_context(self, context, prev_meta = {}, summary_system_prompt = SUMMARIZER_PROMPT, auto_warm_up = False):
         if auto_warm_up and self.model and self.model.state == DOWN: 
             await self.model.warm_up()
+        
+        if prev_meta is None:
+            prev_meta = {}
+
+        prev_facts = prev_meta.get('facts', prev_meta.get("prev_facts"))
+        prev_summary = prev_meta.get('summary', prev_meta.get("prev_summary"))
+        prev_open_threads = prev_meta.get('open_threads', prev_meta.get("prev_open_threads"))
+        prev_key_decisions = prev_meta.get('key_decisions', prev_meta.get("prev_key_decisions"))
+
         if not isinstance(self.model, (RemoteModel, LocalModel, OpenRouterModel)): 
             await Logger.log_async("Summarising model not set. please provide a summarising model before summarising.", "error")
-            return prev_summary, prev_facts, context 
+            meta = {
+                'facts': prev_facts,
+                'summary': prev_summary,
+                'open_threads': prev_open_threads,
+                'key_decisions': prev_key_decisions
+            }
+
+            return meta, context
         
         contents = [x.get("content", "").strip() for x in context if x.get("content")]
         if prev_summary: contents.append(prev_summary)
         if prev_facts: contents.extend(prev_facts)
+        if prev_open_threads: contents.extend(prev_open_threads)
+        if prev_key_decisions: contents.extend(prev_key_decisions)
 
         if estimate_tokens(" ".join(contents)) >= self.summary_max_tokens:  
             text = '\n'
@@ -62,7 +100,14 @@ class Summariser:
             to_keep = context[keep_idx:]
             
             if not summarize_part:
-                return prev_summary, prev_facts, context
+                meta = {
+                'facts': prev_facts,
+                'summary': prev_summary,
+                'open_threads': prev_open_threads,
+                'key_decisions': prev_key_decisions
+                }
+
+                return meta, context
 
             used = 0
             for t in summarize_part:
@@ -115,9 +160,16 @@ class Summariser:
             </PREVIOUS_SUMMARY>""" + text  
 
 
-            if prev_facts: text = f"Below are the previous facts extracted from the previous conversation turns. Change the facts only when explicitly contradicted or explicitly stated to forget. Do NOT invent facts or context. treat the given conversation aa ground truth.\n Never invent or assume context unless provided in the previous lossy summary or the provided conversation. You're allowed to merge facts only when they explicitly overlap.\n<PREVIOUS_FACTS>\n{prev_facts}\n</PREVIOUS_FACTS>" + text
+            if prev_facts: text = f"Below are the previous facts extracted from the previous conversation turns. Change the facts only when explicitly contradicted or explicitly stated to forget. Do NOT invent facts or context. treat the given conversation aa ground truth.\n Never invent or assume context unless provided in the previous lossy summary or the provided conversation. You're allowed to merge facts only when they explicitly overlap.\n<PREVIOUS_FACTS>\n{"\n".join(prev_facts)}\n</PREVIOUS_FACTS>".strip() + text
+            
+            if prev_open_threads:
+                text = f"Below are the previous open threads extracted from the previous conversation turns. Change the open threads only when explicitly contradicted or explicitly stated to forget. Do NOT invent threads or context. treat the given conversation aa ground truth.\n Never invent or assume context unless provided in the previous lossy summary or the provided conversation. You're allowed to merge threads only when they explicitly overlap\n<THREADS>\n{"\n".join(prev_open_threads)}\n<THREADS>".strip() + text
 
-            text += "\n\nPrefer recent evidence (conversation) over prior system generated summary / facts."
+            if prev_key_decisions:
+                text = f"Below are the previous key decisions extracted from the previous conversation turns. Change the key decisions only when explicitly contradicted or explicitly stated to forget. Do NOT invent key decisions or context. treat the given conversation aa ground truth.\n Never invent or assume context unless provided in the previous lossy summary or the provided conversation. You're allowed to merge decisions only when they explicitly overlap\n<DECISIONS>\n{"\n".join(prev_key_decisions)}\n<DECISIONS>".strip() + text
+
+
+            text += "\n\nPrefer recent evidence (conversation) over prior system generated summary / facts / open threads / key decisions."
 
             entry = None  
             try:  
@@ -126,27 +178,71 @@ class Summariser:
                         entry = out
 
             except Exception as e:  
-                await Logger.log_async(f"Error during summarization: {e}", "error")
+                await Logger.log_async(f"Error during summarization: {e}; {traceback.format_exc()}", "error")
                 if self.event_bus:
                     await self.event_bus.sequence_emit(self.event_bus.SUMMARISING_FAILED, error=str(e))
 
             summary = prev_summary
             facts = prev_facts
+            key_decisions = prev_key_decisions or []
+            open_threads = prev_open_threads or []
             if entry:
+                entry = re.sub(r"```json\n?|```", "", entry)
                 try:
                     entry = json.loads(entry)
                     if isinstance(entry, dict):
                         entry = entry
                 except json.JSONDecodeError:
                     await Logger.log_async("Summariser json failed", "warn")
-                    return prev_summary, prev_facts, context 
+                    await Logger.log_async(f"Raw output: {entry}", "warn")
+                    if self.event_bus: await self.event_bus.sequence_emit(self.event_bus.SUMMARISING_FAILED, error= "Summariser json failed")
+                    meta = {
+                        'facts': prev_facts,
+                        'summary': prev_summary,
+                        'open_threads': prev_open_threads,
+                        'key_decisions': prev_key_decisions
+                    }
+
+                    return meta, context
+                        
+                summary = str(entry["summary"])
+                summary_words_len = len(summary.split())
+                if summary_words_len < 20:
+                    await Logger.log_async("Summary too short", "warn")
+                    if self.event_bus: await self.event_bus.sequence_emit(self.event_bus.SUMMARISING_FAILED, error= "Summary too short")
+                    meta = {
+                        'facts': prev_facts,
+                        'summary': prev_summary,
+                        'open_threads': prev_open_threads,
+                        'key_decisions': prev_key_decisions
+                    }
+
+                    return meta, context
+
+                facts = entry["facts"]
+                facts = list(set(facts))
+                if len(facts) < 3:
+                    await Logger.log_async("Facts array too short", "warn")
+                    if self.event_bus: await self.event_bus.sequence_emit(self.event_bus.SUMMARISING_FAILED, error= "Facts array too short")
+
+                key_decisions = entry['key_decisions']
+                key_decisions = list(set(key_decisions))
                 
-                summary = entry["summary"]
-                facts = entry["facts"]  
-                context = to_keep 
+                open_threads = entry['open_threads']
+                open_threads = list(set(open_threads))
+
+                context = to_keep
 
             # TODO: Trim the context to remove older entries if needed explicitly  
             await Logger.log_async("Summarised successfully", 'success')
             if self.event_bus:
                 await self.event_bus.sequence_emit(self.event_bus.SUMMARISED,)
-            return summary, facts, context
+            
+            meta = {
+                'facts': facts if facts and len(facts) > 2 else ((prev_facts) + (facts or []) if prev_facts else []),
+                'summary': summary,
+                'open_threads': open_threads,
+                'key_decisions': key_decisions
+            }
+
+            return meta, context

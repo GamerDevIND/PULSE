@@ -15,6 +15,7 @@ from lancedb.rerankers import MRRReranker # you can use your own
 import shutil
 import os
 import json
+import traceback
 import re
 
 def sanitize_id(oid: str) -> str:
@@ -262,7 +263,7 @@ class RAG_manager:
             await Logger.log_async(f"Deleted memory {mem_id}", "info")
             return True
         except Exception as e:
-            await Logger.log_async(f"Failed to delete memory {mem_id}: {e}", "error")
+            await Logger.log_async(f"Failed to delete memory {mem_id}: {e}; {traceback.format_exc()}", "error")
             return False
     
     async def update(self, mem_id: str, new_text: str):
@@ -299,5 +300,5 @@ class RAG_manager:
             await Logger.log_async(f"Updated memory {mem_id}", "info")
             return True
         except Exception as e:
-            await Logger.log_async(f"Failed to update memory {mem_id}: {e}", "error")
+            await Logger.log_async(f"Failed to update memory {mem_id}: {e}; {traceback.format_exc()}", "error")
             return False

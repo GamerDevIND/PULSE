@@ -8,6 +8,7 @@ from main.configs import ENV_READ_PREFIX
 from main.generation_session import GenerationSession, DONE, FAIL, CANCELLED 
 from main.tools import ToolRegistry
 from main.utils import Logger
+import traceback
 from main.configs import ERROR_TOKEN, EMBEDDING_MODEL_ROLE
 import inspect
 import json
@@ -103,7 +104,7 @@ class Backend:
                 self._create_model_data(models_data, model, embedder, override_port, overwritten_port, auto_resolve_ports, require_key)
 
         except (FileNotFoundError, json.JSONDecodeError) as e:
-            await Logger.log_async(f"🟥 Error loading models: {e}", "error")
+            await Logger.log_async(f"🟥 Error loading models: {e}; {traceback.format_exc()}", "error")
             raise Exception("Models loading failed.", e) from e
 
     async def cancel_generation(self, session_id:str):
@@ -250,18 +251,46 @@ class Generation:
                     if inspect.isawaitable(r):
                         await r
                 except Exception as e:
-                    await Logger.log_async(f"Removing callback failed for {self.session_id}; {repr(e)}", 'error')
+                    await Logger.log_async(f"Removing callback failed for {self.session_id}; {repr(e)}; {traceback.format_exc()}", 'error')
                 try:
                     r = self.append_callback(c)
                     if inspect.isawaitable(r):
                         await r
                 except Exception as e:
-                    await Logger.log_async(f"Appending callback failed for {self.session_id}; {repr(e)}", 'error')
+                    await Logger.log_async(f"Appending callback failed for {self.session_id}; {repr(e)}; {traceback.format_exc()}", 'error')
 
             finally:
                 if self.event_bus:
                     await self.event_bus.sequence_emit(self.event_bus.GENERATION_STOPPED , gen_id = self.session_id)
-        
+
+    async def run_generation_loop(self,):
+            try:
+                async for (thinking, content, tools) in self.session.run_generation_loop(self.stream_, self.user_save_prefix, self.think, 
+                                                                   self.file_path, self.video_frames_mod):
+                        
+                    if content == ERROR_TOKEN:
+                        return
+                        
+                    yield (thinking or "", content or "", tools or [])
+            finally:
+                try:
+                    c = await self.session.get_context()
+                    try:
+                        r = self.remove_callback(self.session_id)
+                        if inspect.isawaitable(r):
+                            await r
+                    except Exception as e:
+                        await Logger.log_async(f"Removing callback failed for {self.session_id}; {repr(e)}; {traceback.format_exc()}", 'error')
+                    try:
+                        r = self.append_callback(c)
+                        if inspect.isawaitable(r):
+                            await r
+                    except Exception as e:
+                        await Logger.log_async(f"Appending callback failed for {self.session_id}; {repr(e)}; {traceback.format_exc()}", 'error')
+
+                finally:
+                    if self.event_bus:
+                        await self.event_bus.sequence_emit(self.event_bus.GENERATION_STOPPED , gen_id = self.session_id)
 
     async def terminate(self):
         await self.session.cancel()

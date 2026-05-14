@@ -248,12 +248,20 @@ class AI:
         else:
             return False
     
-    async def get_prompted_query(self, context:list, summary, facts, use_memory = True, query:str | None = ""):
+    async def get_prompted_query(self, meta:dict = {}, context:list | None = None, use_memory = True, query:str | None = "",):
 
         '''
         USE THIS METHOD UNDER A LOCK FOR CONCURRENCY SAFETY!
         '''
+
+        facts = meta.get('facts', meta.get("prev_facts"))
+        context = context or meta.get('context', meta.get("prev_context"))
+        summary = meta.get('summary', meta.get("prev_summary"))
+        key_decisions = meta.get('key_decisions', meta.get("prev_key_decisions"))
+        open_threads = meta.get('open_threads', meta.get("prev_open_threads"))
+
         context = deepcopy(context)
+        context = context or []
 
         f = f"""
             The system has also generated a set of facts extracted from the previous turns. These are still lossy facts and maybe inaccurate. 
@@ -262,6 +270,22 @@ class AI:
                 {"\n\n-".join(facts).strip()}
             </FACTS>
             """ if facts and "".join(facts).strip() else ''
+        
+        o = f"""
+            The system has also generated a set of open threads (unresolved or open discussion, debate, tasks, etc) extracted from the previous turns. These are still lossy and maybe inaccurate. 
+            For reference only, use for user profile modeling.
+            <OPEN_THREADS>
+                {"\n\n-".join(open_threads).strip()}
+            </OPEN_THREADS>
+            """ if open_threads and "".join(open_threads).strip() else ''
+        
+        k = f"""
+            The system has also generated a set of key decisions (decisions, commitments, willingness, etc) extracted from the previous turns. These are still lossy and maybe inaccurate. 
+            For reference only, use for user profile modeling.
+            <KEY_DECISONS>
+                {"\n\n-".join(key_decisions).strip()}
+            </KEY_DECISONS>
+            """ if key_decisions and "".join(key_decisions).strip() else ''
        
         if summary:
             context.insert(0, {"role": "assistant", "content": f"""[PERSISTED MEMORY - NOT DIALogger.log_asyncUE]
@@ -273,8 +297,13 @@ class AI:
                 </SUMMARY>
 
                 {f}
+
+                {k}
+
+                {o}
                                            
-                THESE ARE NOT A PART OF THE CONVERSATION. THESE ARE SYSTEM GENERATED PERSISTED MEMORY"""}) # role:system is fatal.
+                THESE ARE NOT A PART OF THE CONVERSATION. THESE ARE SYSTEM GENERATED PERSISTED MEMORY
+                [END INTERNAL DATA]""".strip()}) # role:system is fatal.
             
         if use_memory:
             if not self.RAG_Manager:
@@ -345,7 +374,8 @@ class AI:
             async with self.lock:
                 self.last_cid = c.id
 
-        context = await c.get_context()
+        meta = await c.get_states()
+        context = meta.get('context', [])
 
         async with self.lock:
             self.last_cid = c.id
@@ -379,11 +409,8 @@ class AI:
             if file_path:
                 file_path = await self.context_manager.cache_manager.file_path_resolver(file_path)
 
-            summary = await  c.get_summary()
-            facts = await c.get_facts()
-
             self.status = {"status": "Getting prompts", "message": "Prompting the query for better UX"}
-            context, query = await self.get_prompted_query(context, summary, facts, use_memory, query)
+            context, query = await self.get_prompted_query(meta, context, use_memory, query)
             self.status = {"status": "Generating session", 'message': ""}
                 
 

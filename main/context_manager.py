@@ -10,6 +10,7 @@ from .models.models_profile import RemoteModel
 from .summariser import Summariser
 from .cache_manager import CacheManager
 import os
+import traceback
 import datetime
 from .events import EventBus
 
@@ -47,6 +48,7 @@ class ContextManager:
                 c.messages = context
             
         return context
+    
 
     async def add_and_maintain(self, cid, data:dict | list[dict] | tuple[dict], update:bool = False):
         if not cid in self.conversations:
@@ -57,12 +59,21 @@ class ContextManager:
         await convo.append(data, update)
         await convo.flush_queue()
 
-        r = await self.summariser.maybe_summarise_context(convo.messages, convo.summary, convo.facts)
+        meta = await convo.get_states()
+
+        r = await self.summariser.maybe_summarise_context(convo.messages, meta)
         if r:
-            s, f, c = r
+            meta, c = r
             async with convo.lock:
+                s = meta['summary']
+                f = meta['facts']
+                d = meta.get('key_decisions', [])
+                o = meta.get('open_threads', [])
+                c = convo.attach_meta(c)
                 convo.summary = s
                 convo.facts = f
+                convo.decisions = d
+                convo.threads = o
                 convo.messages = c
 
         if not convo.temp:
@@ -214,8 +225,10 @@ class ContextManager:
 class Conversation:
     def __init__(self, path:str, uuid_= None) -> None:
         self.path = path
-        self.summary = None
-        self.facts = None
+        self.summary = ""
+        self.threads = []
+        self.decisions = []
+        self.facts = []
         self.messages = []
         self.lock = asyncio.Lock()
         self.queue = asyncio.Queue()
@@ -238,6 +251,8 @@ class Conversation:
                 self.id = content.get("id", self.id or str(uuid.uuid4()))
                 self.name = content.get("name", "New chat")
                 self.last_used = content.get('last_used', -1)
+                self.decisions = content.get("key_decisions", [])
+                self.threads = content.get("open_threads", [])
 
         except (FileNotFoundError, json.JSONDecodeError):
             await Logger.log_async("Context missing or corrupted. Starting over.", "warn")
@@ -247,22 +262,28 @@ class Conversation:
             self.id = self.id or str(uuid.uuid4())
             self.name = "New chat"
             self.last_used = -1
+            self.decisions = []
+            self.threads = []
+
+        await Logger.log_async(f"Loading conversation: {self.name} ({self.id})", 'info')
 
     async def save(self, path:str | None = None):
         if self.temp:
             await Logger.log_async("Temporary conversations cannot be saved", 'warn')
             return
+        await Logger.log_async(f"Saving conversation: {self.name} ({self.id})", 'info')
         try:
             await self.flush_queue()
             async with self.lock:
-                data = {"summary":self.summary, "facts": self.facts, "conversation": self.messages, "id": self.id, 'name': self.name, 'last_used': self.last_used}
+                data = {"summary":self.summary, "facts": self.facts,"key_decisions": self.decisions, "open_threads": self.threads, 
+                        "conversation": self.messages, "id": self.id, 'name': self.name, 'last_used': self.last_used}
                 data_to_save = json.dumps(data, indent=2)
 
             async with aiofiles.open(path or self.path, "w") as file:
                 await file.write(data_to_save)
 
         except IOError as e:
-            await Logger.log_async(f"Error saving context: {e}", "error")
+            await Logger.log_async(f"Error saving context: {e}; {traceback.format_exc()}", "error")
 
     async def append(self, data:dict | list[dict] | tuple[dict], update:bool = False): 
         if not update:
@@ -301,6 +322,7 @@ class Conversation:
                 except asyncio.QueueEmpty:
                     break
 
+            items = self.attach_meta(items)
             self.messages.extend(items)
 
     async def get_context(self):
@@ -308,7 +330,25 @@ class Conversation:
         async with self.lock:
             context = deepcopy(list(self.messages))
             return context
-
+        
+    async def get_states(self):
+        meta = {
+            'context': await self.get_context(),
+            'summary': await self.get_summary(),
+            'facts': await self.get_facts(),
+            'key_decisions': await self.get_key_decisions(),
+            'open_threads': await self.get_threads(),
+        }
+        async with self.lock:
+            m = {
+                'name': self.name,
+                'id': self.id,
+                'last_used': self.last_used
+            }
+            meta.update(m)
+        
+        return meta
+        
     async def get_summary(self):
         async with self.lock:
             return str(self.summary) if self.summary is not None else ""
@@ -316,6 +356,55 @@ class Conversation:
     async def get_facts(self):
         async with self.lock:
             return deepcopy(self.facts) if self.facts is not None else []
+        
+    async def get_threads(self):
+        async with self.lock:
+            return deepcopy(self.threads) if self.threads is not None else []
+        
+    async def get_key_decisions(self):
+        async with self.lock:
+            return deepcopy(self.decisions) if self.decisions is not None else []
+        
+    def attach_meta(self, new_messages:list[dict] | dict):
+        new_messages = deepcopy(new_messages)
+        if isinstance(new_messages, (list, tuple)):
+            c = []
+            for m in new_messages:
+                m['edited'] =  m.get('edited') or False
+                m['gen_idx'] = m.get("gen_idx") or 0
+                m['msg_id'] = m.get('msg_id') or str(uuid.uuid4())
+                m['msg_idx'] = m.get("msg_idx") or ((len(c) + len(self.messages)) + 1)
+                c.append(m)
+
+            return c
+        
+        elif isinstance(new_messages, dict):
+            new_messages['edited'] =  new_messages.get('edited') or False
+            new_messages['gen_idx'] = new_messages.get("gen_idx") or 0
+            new_messages['msg_id'] = new_messages.get('msg_id') or str(uuid.uuid4())
+            new_messages['msg_idx'] = new_messages.get("msg_idx") or (len(self.messages) + 1)
+            return new_messages
+
+    def attach_msg_extra_meta(self, new_messages:list[dict] | dict, new_meta: list[dict | None] | dict | None = None):
+        m = self.attach_meta(new_messages)
+        
+        if isinstance(new_messages, (list, tuple)) and isinstance(new_meta, (list, tuple)):
+            m = list(m)
+            new_meta = list(new_meta)
+            if len(new_messages) > len(new_meta):
+                new_meta.extend(None for _ in range(len(new_messages) - len(new_meta)))
+            if len(new_meta) > len(new_messages):
+                raise ValueError("Metadata len too big")
+
+            for msg, meta in zip(m, new_meta):
+                if meta:
+                    msg.update(meta)
+
+        elif new_meta and (isinstance(new_messages, dict) and isinstance(new_meta, dict)):
+            new_messages.update(new_meta)
+
+        else:
+            raise TypeError("Metadata datatype doesn't match.")
 
     async def rename(self, name):
         async with self.lock: 

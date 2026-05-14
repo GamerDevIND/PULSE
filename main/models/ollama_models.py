@@ -6,6 +6,7 @@ from main.utils import Logger, strip_thinking
 from main.configs import IMAGE_EXTs, VIDEO_EXTs, AUDIO_EXTs, ERROR_TOKEN
 from main.events import EventBus
 from .base_model import Model
+import traceback
 import sys
 if sys.platform != 'win32':
     from signal import SIGKILL
@@ -59,7 +60,7 @@ class OllamaModel(Model):
         try:
             return await self.input_handler.encode_frames_from_vid(video_path, False, mod_, format_, 5)
         except Exception as e:
-            await Logger.log_async(f"Error in video frame encoding for {self.name}: {e}", 'error')
+            await Logger.log_async(f"Error in video frame encoding for {self.name}: {e}; {traceback.format_exc()}", 'error')
             return ERROR_TOKEN, repr(e)
     
     async def _encode_image(self, image_path):
@@ -81,6 +82,7 @@ class OllamaModel(Model):
                 image, e = await self._encode_image(image_path=file_path)
                 if image == ERROR_TOKEN:
                     await Logger.log_async(f"Error encoding image! Skipping: {repr(e)}", 'error')
+                    if self.event_bus: await self.event_bus.sequence_emit(self.event_bus.ERROR, msg = f"Error encoding image! Skipping: {repr(e)}",)
                 else:
                     data['messages'][-1]['images'] = [image]
             if ext in VIDEO_EXTs and self.has_video:
@@ -95,6 +97,7 @@ class OllamaModel(Model):
                         d = frames
             elif ext in VIDEO_EXTs and not self.has_video:
                 await Logger.log_async(f"Cannot process video file {file_path}: Model {self.name} is not configured for video processing.", 'warn')
+                if self.event_bus: await self.event_bus.sequence_emit(self.event_bus.ERROR, msg = f"Error encoding video! Skipping: {repr(e)}",)
                 
         if self.has_audio and file_path is not None:
             ext = os.path.splitext(file_path)[1].lower()
@@ -102,7 +105,8 @@ class OllamaModel(Model):
                 audio, e = await self._encode_audio(audio_path=file_path)
 
                 if audio  == ERROR_TOKEN:
-                    await Logger.log_async(f"Error encoding Audio! Skipping: {repr(e)}", 'error')
+                    await Logger.log_async(f"Error encoding audio! Skipping: {repr(e)}", 'error')
+                    if self.event_bus: await self.event_bus.sequence_emit(self.event_bus.ERROR, msg = f"Error encoding audio! Skipping: {repr(e)}",)
                 else:
                     current_images = data['messages'][-1].get('images', [])
                     if audio not in current_images:
@@ -172,6 +176,11 @@ class OllamaModel(Model):
 
                                 try:
                                     json_line = json.loads(line)
+                                    if 'error' in json_line:
+                                        e = json_line['error']
+                                        await Logger.log_async(f"Ollama API Request Error: {e}; {traceback.format_exc()}", "error")
+                                        if self.event_bus: await self.event_bus.parallel_emit(self.event_bus.ERROR, msg = f"Ollama API Request Error: {e}")
+
                                     thinking_chunk = json_line.get("message", {}).get("thinking", "")
                                     content_chunk = json_line.get("message", {}).get("content", "")
                                     tools_chunk = json_line.get("message", {}).get("tool_calls", []) 
@@ -196,6 +205,11 @@ class OllamaModel(Model):
                 else:
                     try:
                         res_json = await response.json()
+                        if 'error' in res_json:
+                            e = res_json['error']
+                            await Logger.log_async(f"Ollama API Request Error: {e}; {traceback.format_exc()}", "error")
+                            if self.event_bus: await self.event_bus.parallel_emit(self.event_bus.ERROR, msg = f"Ollama API Request Error: {e}")
+                            
                         thinking = res_json.get("message", {}).get("thinking", "")
                         content = res_json.get("message", {}).get("content", "")
                         tools = res_json.get("message", {}).get("tool_calls", [])
@@ -220,7 +234,7 @@ class OllamaModel(Model):
             return
 
         except Exception as e:
-            await Logger.log_async(f"Ollama API Request Error: {e}", "error")
+            await Logger.log_async(f"Ollama API Request Error: {e}; {traceback.format_exc()}", "error")
             if self.event_bus: await self.event_bus.parallel_emit(self.event_bus.ERROR, msg = f"Ollama API Request Error: {e}")
             yield (ERROR_TOKEN, ERROR_TOKEN, [])
 
@@ -328,7 +342,7 @@ class OllamaModel(Model):
                             except json.JSONDecodeError:
                                 continue
             except Exception as e:
-                    await Logger.log_async(f"Failed to load model's response while streaming: {repr(e)}", 'error')
+                    await Logger.log_async(f"Failed to load model's response while streaming: {repr(e)}; {traceback.format_exc()}", 'error')
                     raise Exception(f"Failed to load model's response while streaming: {repr(e)}") from e
                     
             self.warmed_up = True
@@ -433,7 +447,7 @@ class OllamaEmbedder(Model):
             return
 
         except Exception as e:
-            await Logger.log_async(f"Ollama API Request Error: {e}", "error")
+            await Logger.log_async(f"Ollama API Request Error: {e}; {traceback.format_exc()}", "error")
             if self.event_bus: await self.event_bus.parallel_emit(self.event_bus.ERROR, msg = f"Ollama API Request Error: {e}")
             return (ERROR_TOKEN)
         
@@ -488,7 +502,7 @@ class OllamaEmbedder(Model):
                     if self.event_bus: await self.event_bus.parallel_emit(self.event_bus.INFO, msg = f"Warming up done for: {self.name}({self.model_name})")
                     self.warmed_up = True
                 except Exception as e:
-                    await Logger.log_async(f"Failed to load embedding model's response while warming up: {repr(e)}", 'error')
+                    await Logger.log_async(f"Failed to load embedding model's response while warming up: {repr(e)}; {traceback.format_exc()}", 'error')
                     raise Exception(f"Failed to load embedding model's response while warming up: {repr(e)}") from e
         except Exception:
             self.warmed_up = False

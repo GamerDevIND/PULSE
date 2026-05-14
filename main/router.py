@@ -1,4 +1,5 @@
 from .utils import Logger
+import traceback
 from .configs import ERROR_TOKEN
 import json
 from .models.ollama_models import DOWN
@@ -61,13 +62,13 @@ class Router:
                     if part:
                         router_resp_parts.append(part)
             except Exception as e:
-                await Logger.log_async(f"Exception during routing: {e}", "error")
+                await Logger.log_async(f"Exception during routing: {e}; {traceback.format_exc()}", "error")
                 return query, self.fallback_role
 
             router_resp_raw = "".join([str(p) for p in router_resp_parts if p is not None]).strip()
             selected_role = None
 
-            await Logger.log_async(f"Router raw response: {router_resp_raw}", "info")
+            await Logger.log_async(f"Router raw response: {router_resp_raw}", "info", save_to_file=False)
 
             try:
                 router_resp = json.loads(router_resp_raw)

@@ -9,6 +9,7 @@ from .configs import IMAGE_EXTs, VIDEO_EXTs, FILE_NAME_KEY
 from .utils import Logger
 from copy import deepcopy
 from .events import EventBus
+import traceback
 
 class GarbageCollector:
     def __init__(self, image_cache_dir, video_cache_dir, time_limit, size_threshold_in_mbs, event_bus: None | EventBus = None) -> None:
@@ -68,7 +69,7 @@ class GarbageCollector:
                     await asyncio.to_thread(os.remove, index[k]['path'])
                     current_size -= index[k]['size']
                     del index[k]
-                except Exception as e: await Logger.log_async(f"Error deleting: {index[k]['path']}: {repr(e)}", "error")
+                except Exception as e: await Logger.log_async(f"Error deleting: {index[k]['path']}: {repr(e)}; {traceback.format_exc()}", "error")
         if self.event_bus:
             await self.event_bus.sequence_emit(self.event_bus.GARBAGE_COLLECTED)
         return index
@@ -157,7 +158,7 @@ class CacheManager:
         try:
             hashed = await asyncio.to_thread(self._hash_file, file_path)
         except Exception as e:
-            await Logger.log_async(f"An error occurred while hashing: {repr(e)}", 'error')
+            await Logger.log_async(f"An error occurred while hashing: {repr(e)}; {traceback.format_exc()}", 'error')
             hashed = None
 
         if not hashed:
@@ -189,9 +190,16 @@ class CacheManager:
         return dest
     
     async def context_resolver(self, context, file_name_key=FILE_NAME_KEY, max_keeps=1):
-        resolved_context = deepcopy(context) 
+        resolved_context = deepcopy(context)
         found_files = 0
         l = []
+
+        def normalise_context(context):
+            resolved_context = []
+            # ...
+            return context
+        
+        resolved_context = normalise_context(resolved_context)
 
         for msg in reversed(resolved_context):
             if file_name_key in msg and msg[file_name_key]:
@@ -203,16 +211,41 @@ class CacheManager:
                         msg["content"] += note
                     elif isinstance(msg["content"], list):
                         msg["content"].append({"type": "text", "text": note})
-            
+                else:
+                    file_name = msg[file_name_key]
+                    async with self.lock:
+                        d = self.cache_index.get(file_name)
+                        if not d:
+                            await Logger.log_async(f"{file_name} doesn't exist in cache, attempting to cache...", 'warn')
+                            await self.cache_file(file_name,)
+                        else:
+                            d["last_used"] = datetime.datetime.now().timestamp()
+
             l.append(msg)
 
-        return list(reversed(l))
+        l = list(reversed(l))
+
+        c = []
+        for msg in l:
+            role = msg['role']
+            content = msg['content']
+            m = {'role': role, 'content': content}
+            if role == 'assistant':
+                m['thinking'] = msg.get('thinking', '')
+                m['tool_calls'] = msg.get('tool_calls', [])
+
+            if role == 'tool':
+                m['tool_name'] = msg['tool_name']
+
+            c.append(m)
+
+        return c
     
     async def file_path_resolver(self, file_path, auto_cache = True):
         try:
             hashed = await asyncio.to_thread(self._hash_file, file_path)
         except Exception as e:
-            await Logger.log_async(f"An error occurred while hashing: {repr(e)}", 'error')
+            await Logger.log_async(f"An error occurred while hashing: {repr(e)}; {traceback.format_exc()}", 'error')
             hashed = None
 
         if not hashed:
@@ -225,9 +258,7 @@ class CacheManager:
                 return self.cache_index[hashed]['path']
                 
         if auto_cache:
-            return await self.cache_file(file_path) 
-        else:
-            raise FileNotFoundError(f"{file_path} isn't in the cache")
+            return await self.cache_file(file_path)
 
     async def save(self):
         data_to_save = json.dumps(self.cache_index, indent=2)

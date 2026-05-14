@@ -5,6 +5,7 @@ from .utils import Logger
 import asyncio
 import os
 import sys
+import traceback
 
 class SessionManager:
     def __init__(self, model_name) -> None:
@@ -21,14 +22,14 @@ class SessionManager:
                 try:
                     await self.session.close()
                 except Exception as e:
-                    await Logger.log_async(f"An error occurred during session cleanup: {e}", "error")
+                    await Logger.log_async(f"An error occurred during session cleanup: {e}; {traceback.format_exc()}", "error")
                 
                 if set_session_to_None and (self.session and (not self.session.closed)):
                     try:
                         await self.session.close()
                         await asyncio.sleep(0.5)
                     except Exception as e:
-                        await Logger.log_async(f"An error occurred during session closing: {e}", "error") 
+                        await Logger.log_async(f"An error occurred during session closing: {e}; {traceback.format_exc()}", "error") 
                     self.session = None
                 
                 return
@@ -40,20 +41,20 @@ class SessionManager:
                 async with self.session.post(url, json=payload, headers=headers, timeout=aiohttp.ClientTimeout(total=15)) as resp:
                     resp.raise_for_status()
             except Exception as e:
-                await Logger.log_async(f"An error occurred during session cleanup: {e}", "error")
+                await Logger.log_async(f"An error occurred during session cleanup: {e}; {traceback.format_exc()}", "error")
 
             await asyncio.sleep(1.5) 
             try:
                 await self.session.close()
             except Exception as e:
-                await Logger.log_async(f"An error occurred during session cleanup: {e}", "error")
+                await Logger.log_async(f"An error occurred during session cleanup: {e}; {traceback.format_exc()}", "error")
 
         if set_session_to_None and (self.session and (not self.session.closed)):
             try:
                 await self.session.close()
                 await asyncio.sleep(0.5)
             except Exception as e:
-                await Logger.log_async(f"An error occurred during session closing: {e}", "error") 
+                await Logger.log_async(f"An error occurred during session closing: {e}; {traceback.format_exc()}", "error") 
             self.session = None
 
     async def wait_until_ready(self, url: str, timeout: int = 30):
@@ -119,7 +120,7 @@ class ResourceManager(SessionManager):
                     self._log_file.flush()
                     self._log_file.close()
                 except Exception as e:
-                    print(f"An error occurred during process creation: {e}")
+                    print(f"An error occurred during process creation: {e}; {traceback.format_exc()}; {traceback.format_exc()}")
                 self._log_file = None 
 
     async def shutdown(self, send_shutdown_paylod = True, url = None, headers:dict|None = None, payload=None, session_cleanup= True, process_cleanup=False, set_session_to_None = True):
@@ -160,7 +161,7 @@ class ResourceManager(SessionManager):
                 except psutil.NoSuchProcess:
                     await Logger.log_async(f"Process {pid} already terminated.", "debug")
                 except Exception as e:
-                    await Logger.log_async(f"Error during shutdown of {self.ref_name}: {e}", "error")
+                    await Logger.log_async(f"Error during shutdown of {self.ref_name}: {e}; {traceback.format_exc()}", "error")
                 finally:
                     self.process = None
 
@@ -169,5 +170,5 @@ class ResourceManager(SessionManager):
                 self._log_file.flush()
                 self._log_file.close()
             except Exception as e:
-                await Logger.log_async(f"An error occurred during process file cleanup: {e}", "info")
+                await Logger.log_async(f"An error occurred during process file cleanup: {e}; {traceback.format_exc()}", "info")
             self._log_file = None 
