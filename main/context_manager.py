@@ -63,7 +63,7 @@ class ContextManager:
         meta = await convo.get_states()
 
         async with convo.lock:
-            snapshot_context = list(convo.messages)
+            snapshot_context = meta['context']
             last_snapshot_msg_id = snapshot_context[-1]['msg_id'] if snapshot_context else None
 
         if self._summarization_tasks.get(cid) and not self._summarization_tasks[cid].done():
@@ -92,7 +92,7 @@ class ContextManager:
                     convo.facts = new_meta.get('facts', convo.facts)
                     convo.decisions = new_meta.get('key_decisions', convo.decisions)
                     convo.threads = new_meta.get('open_threads', convo.threads)
-                    convo.messages = final_context
+                    convo.messages = convo.attach_meta(final_context)
                     
                 if not convo.temp:
                     await self.save(cid)
@@ -187,6 +187,8 @@ class ContextManager:
                             await t
                         except asyncio.CancelledError:
                             pass
+                        
+                        del self._summarization_tasks[cid]
 
             del self.conversations[cid]
     
@@ -223,6 +225,8 @@ class ContextManager:
                 await t
             except asyncio.CancelledError:
                 pass
+
+        self._summarization_tasks.clear()
 
         await Logger.log_async("Context saved and context manager shut down.", "info")
 
