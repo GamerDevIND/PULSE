@@ -8,6 +8,7 @@ sys.path.append(str(pathlib.Path(__file__).parent.parent))
 
 from main.AI import AI
 from main.utils import Logger, estimate_tokens
+import traceback
 
 colorama.init()
 
@@ -179,7 +180,7 @@ async def main():
                 await gen.terminate()
             print(f"{colorama.Fore.RED}Generation cancelled{colorama.Style.RESET_ALL}")
         except Exception as e:
-            await Logger.log_async(f"Main loop error: {e}", "error")
+            await Logger.log_async(f"Main loop error: {e}; {traceback.format_exc()}", "error")
             if not shutdown_event.is_set():
                 await shutdown()
             break

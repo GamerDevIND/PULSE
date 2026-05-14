@@ -176,6 +176,7 @@ document.addEventListener('DOMContentLoaded', () => {
         if (message.trim()) appendMessage("user", message);
 
         textarea.value = '';
+        console.log("Sending message")
         textarea.style.height = 'auto';
         isWaitingForResponse = true;
         sendButton.disabled = true;
@@ -429,6 +430,7 @@ eventSource.onmessage = (event) => {
     try {
         const data = JSON.parse(event.data);
         toasts.show(data.type, data.message);
+        console.log(data.type, data.message)
     } catch (e) {
         console.error("Failed to parse event data", e);
     }
@@ -438,18 +440,20 @@ eventSource.onerror = () => {
     console.warn("EventSource failed. Server might be restarting...");
 };
 
-async function updateModelStatuses() {
-    try {
-        const response = await fetch('/api/models-status');
-        if (!response.ok) return;
-        const models = await response.json();
-        models.forEach(model => {
+const ModelStatusSource = new EventSource("/api/models-status")
+
+ModelStatusSource.onmessage = (event) => {
+    try{
+        const data = JSON.parse(event.data)
+        data.forEach(model => {
             const container = document.querySelector(`.model-row[data-model="${model.name}"]`);
             if (container) {
                 const statusEl = container.querySelector('.js-status');
                 if (statusEl) statusEl.innerText = model.state;
             }
-        });
-    } catch (err) {console.error(err)}
+        })
+    }
+    catch (e){
+        console.error("Failed to parse event data", e)
+    }
 }
-setInterval(updateModelStatuses, 750);

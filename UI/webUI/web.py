@@ -14,8 +14,10 @@ from main.utils import Logger, estimate_tokens
 from main.configs import USERNAME, DEFAULT_PROMPT, CHAOS_PROMPT, RAG_MIN_SCORE
 
 app = Quart(__name__)
-ai = AI("main/Models_config.json", mode='openrouter', use_RAG=False)
+ai = AI("main/Models_configs.json", mode='openrouter', use_RAG=False)
 notification_queue = asyncio.Queue()
+models_status_cooldown_secs = 0.8
+SSE_timeout = 30
 
 def get_greeting():
     
@@ -166,8 +168,22 @@ async def settings():
 
 @app.route('/api/models-status')
 async def models_status_api():
-    states = ai.backend.get_models_state() if ai.backend else []
-    return jsonify(states)
+    async def event_generator():
+        def get():
+            return ai.backend.get_models_state() if ai.backend else []
+        
+        while True:
+            try:
+                try:
+                    data = await asyncio.wait_for(asyncio.to_thread(get), timeout=SSE_timeout)
+                    yield f"data: {json.dumps(data)}\n\n"
+                    await asyncio.sleep(models_status_cooldown_secs)
+                except asyncio.TimeoutError:
+                    yield ": keep-alive\n\n"
+            except asyncio.CancelledError:
+                break
+
+    return Response(event_generator(), mimetype="text/event-stream")
 
 @ai.event('*')
 async def all_events(**kwargs):
@@ -184,19 +200,30 @@ async def all_events(**kwargs):
         ai.event_bus.INITIALISED: "success"
     }
 
-    if event_name in type_map and msg:
-        await notification_queue.put({
-            "message": msg,
-            "type": type_map.get(event_name, 'info'),
-            "event": event_name
-        })
+    if not event_name:
+        return
+
+    message = msg if msg is not None else event_name.replace("_", " ").capitalize().strip()
+    ev = {
+        "message": message,
+        "type": type_map.get(event_name, 'info'),
+        "event": event_name
+    }
+    await notification_queue.put(ev)
 
 @app.route('/events/notifications')
 async def stream_notifications():
     async def event_generator():
         while True:
-            data = await notification_queue.get()
-            yield f"data: {json.dumps(data)}\n\n"
+            try:
+                try:
+                    data = await asyncio.wait_for(notification_queue.get(), timeout=SSE_timeout)
+                    yield f"data: {json.dumps(data)}\n\n"
+                except asyncio.TimeoutError:
+                    yield ": keep-alive\n\n"
+        
+            except asyncio.CancelledError:
+                break
             
     return Response(event_generator(), mimetype="text/event-stream")
 
