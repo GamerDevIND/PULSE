@@ -11,6 +11,7 @@ from .backends.openrouter_backend import OpenrouterBackend
 from .backends.single_server import SingleServer
 from .backends.backend import Generation
 import inspect
+import traceback
 from copy import deepcopy
 from .events import EventBus
 from .context_manager import ContextManager
@@ -176,9 +177,7 @@ class AI:
         await self.event_bus.sequence_emit(self.event_bus.CANCELLING_SESSION, session_id = session_id)
         if not self.backend:
             await Logger.log_async("No backend provided!", 'error')
-            raise
-        
-        await self.backend.cancel_generation(session_id)
+            raise RuntimeError("No backend available for cancellation.")
             
         await Logger.log_async('Generation cancelled by user', 'info')
 
@@ -355,7 +354,7 @@ class AI:
                                 user_save_prefix = None, save_thinking = True, options = None, format_: dict | None = None, use_memory = True):
         if not self.backend:
             await Logger.log_async("No backend provided!", 'error')
-            raise
+            raise RuntimeError("No backend available for generation.")
 
         await self.event_bus.sequence_emit(self.event_bus.CREATING_SESSION)
         async with self.lock:
@@ -441,11 +440,22 @@ class AI:
                 await task
             except asyncio.CancelledError:
                 pass
+        self.running_tasks.clear()
 
-        await self.context_manager.shut_down()
-        
+        try:
+            await self.context_manager.shut_down()
+        except Exception as e:
+            await Logger.log_async(f"Context manager shutdown failed: {e}; {traceback.format_exc()}", 'error')
+
         if self.backend:
-            await self.backend.shutdown()
+            try:
+                await self.backend.close_sessions()
+            except Exception as e:
+                await Logger.log_async(f"Backend close_sessions failed: {e}; {traceback.format_exc()}", 'warn')
+            try:
+                await self.backend.shutdown()
+            except Exception as e:
+                await Logger.log_async(f"Backend shutdown failed: {e}; {traceback.format_exc()}", 'error')
         else:
             await Logger.log_async("No backend provided! Skipping backend shutdown.", 'error')
         

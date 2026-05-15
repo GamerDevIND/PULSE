@@ -33,7 +33,6 @@ class EventBus:
     MODELS_LOADED = "loaded models"
     INFO = "info"
     WARN = "warn"
-    WARNING = "warn"
     ERROR = "error"
     SUCCESS = "success"
 
@@ -77,6 +76,10 @@ class EventBus:
         for l in wild:
             try:
                 ev = event.copy()
+                msg = ev.get("msg", ev.get('message', ""))
+                
+                msg = f"{msg}\n{', '.join([f"{k} = {v}" for k, v in ev.items()])}"
+
                 ev['event_name'] = event_name
                 f = l(**ev)
                 
@@ -104,6 +107,10 @@ class EventBus:
             specific = list(self.listeners.get(event_name, set()))
 
         if wild:
+            msg = event.get("msg", event.get('message', ""))
+                
+            msg = f"{msg}\n{', '.join([f"{k} = {v}" for k, v in event.items()])}"
+
             wild_payload = {**event, 'event_name': event_name}
             for listener in wild:
                 if inspect.iscoroutinefunction(listener):

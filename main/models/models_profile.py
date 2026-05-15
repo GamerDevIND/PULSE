@@ -1,10 +1,13 @@
 from .ollama_models import OllamaModel, DOWN, BUSY, SHUTTING_DOWN, IDLE, OllamaEmbedder
 from main.utils import Logger
 from main.resource_manager import SessionManager
+from main.events import EventBus
 
 class RemoteModel(OllamaModel):
-    def __init__(self, role: str, name: str, model_name: str, has_tools: bool, has_CoT: bool, has_vision: bool, port, system_prompt: str, api_key: None | str = None) -> None:
-        super().__init__(role,name,model_name, has_tools, has_CoT, has_vision, port, system_prompt, api_key)
+    def __init__(self, role: str, name: str, model_name: str, has_tools: bool, has_CoT: bool, has_vision: bool,has_audio,  port, system_prompt: str, 
+                 api_key: None | str = None, event_bus: None | EventBus = None) -> None:
+        super().__init__(role,name,model_name, has_tools, has_CoT, has_vision, has_audio, port, system_prompt, 
+                         api_key, event_bus)
         self.resource_manager = SessionManager(self.model_name)
         
     async def warm_up(
@@ -53,8 +56,8 @@ class RemoteModel(OllamaModel):
 
 
 class RemoteEmbedder(OllamaEmbedder):
-    def __init__(self, role, name: str, model_name: str, port:int,  **kwargs) -> None:
-        super().__init__(role, name, model_name, port)
+    def __init__(self, role, name: str, model_name: str, port:int, api_key, event_bus, **kwargs) -> None:
+        super().__init__(role, name, model_name, port, api_key, event_bus)
         self.resource_manager = SessionManager(self.model_name)
 
     async def warm_up(self):

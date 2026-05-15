@@ -2,11 +2,14 @@ import os
 import aiohttp
 from .ollama_models import OllamaModel, IDLE, BUSY, SHUTTING_DOWN, DOWN, OllamaEmbedder
 from main.utils import Logger
+from main.events import EventBus
 from main.resource_manager import ResourceManager
 
 class LocalModel(OllamaModel):
-    def __init__(self, role: str, name: str, model_name: str, has_tools: bool, has_CoT: bool, has_vision: bool, port: int, system_prompt: str, api_key: None | str = None):
-        super().__init__(role, name, model_name, has_tools, has_CoT, has_vision, port, system_prompt, api_key)
+    def __init__(self, role: str, name: str, model_name: str, has_tools: bool, has_CoT: bool, has_vision: bool, has_audio, port: int, system_prompt: str, 
+                 api_key: None | str = None, event_bus: None | EventBus = None):
+        super().__init__(role, name, model_name, has_tools, has_CoT, has_vision, has_audio, port, system_prompt, 
+                         api_key, event_bus)
         self.start_command = ["ollama", "serve"]
         self.ollama_env = os.environ.copy()
         self.ollama_env["OLLAMA_HOST"] = self.host
@@ -39,7 +42,7 @@ class LocalModel(OllamaModel):
                         if self.model_name in downloaded_models:
                             is_actually_alive = True
                         else:
-                            await Logger.log_async(f"Server alive on {self.port}, but {self.model_name} not found in library.", "warn")
+                            await Logger.log_async(f"Server alive on {self.port}, but {self.model_name} not found in library ({downloaded_models}).", "warn")
         except Exception as e:
             await Logger.log_async(f"An error occured while checking port: {repr(e)}", 'error')
 
@@ -109,8 +112,8 @@ class LocalModel(OllamaModel):
 
 
 class LocalEmbedder(OllamaEmbedder):
-    def __init__(self, role, name: str, model_name: str, port:int, **kwargs) -> None:
-        super().__init__(role, name, model_name, port)
+    def __init__(self, role, name: str, model_name: str, port:int, api_key, event_bus, **kwargs) -> None:
+        super().__init__(role, name, model_name, port, api_key, event_bus)
         self.start_command = ["ollama", "serve"]
         self.ollama_env = os.environ.copy()
         self.ollama_env["OLLAMA_HOST"] = self.host

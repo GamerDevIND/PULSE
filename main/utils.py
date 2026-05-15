@@ -29,8 +29,8 @@ class Logger:
             "warn": "⚠️",
             "error": "🟥",
             "success": "✅"
-        }.get(level.lower(), "📋")
-        return f"{emoji} [{level.upper()}] {message} - [{timestamp}]\n"
+        }.get(level.lower().strip(), "📋")
+        return f"{emoji} [{level.upper().strip()}] {message} - [{timestamp}]\n"
 
     @classmethod
     def log_sync(cls, message: str, level, append = True, stdout = True, save_to_file = True):
@@ -61,7 +61,7 @@ class Logger:
                     await f.write(text)
 
 def estimate_tokens(text:str):
-    return len(text) / 3.5
+    return round(len(text) / 3.5)
 
 THINK_RE = re.compile(r'<think>(.*?)</think>', re.DOTALL | re.IGNORECASE)
 

@@ -28,8 +28,6 @@ class ContextManager:
 
         self.cache_manager = CacheManager(gc_time_limit, gc_limit_size_MBs, gc_interval, cache_folder, event_bus)
 
-        self._summarization_tasks = {}
-
         os.makedirs(self.context_dir, exist_ok=True)
         self.event_bus = event_bus
 
@@ -51,6 +49,7 @@ class ContextManager:
             
         return context
     
+
     async def add_and_maintain(self, cid, data:dict | list[dict] | tuple[dict], update:bool = False):
         if not cid in self.conversations:
             await Logger.log_async(f"{cid} not in registry", 'error')
@@ -62,48 +61,23 @@ class ContextManager:
 
         meta = await convo.get_states()
 
-        async with convo.lock:
-            snapshot_context = meta['context']
-            last_snapshot_msg_id = snapshot_context[-1]['msg_id'] if snapshot_context else None
+        r = await self.summariser.maybe_summarise_context(convo.messages, meta)
+        if r:
+            meta, c = r
+            async with convo.lock:
+                s = meta['summary']
+                f = meta['facts']
+                d = meta.get('key_decisions', [])
+                o = meta.get('open_threads', [])
+                c = convo.attach_meta(c)
+                convo.summary = s
+                convo.facts = f
+                convo.decisions = d
+                convo.threads = o
+                convo.messages = c
 
-        if self._summarization_tasks.get(cid) and not self._summarization_tasks[cid].done():
-            return
-
-        async def background_summarize():
-            try:
-                res = await self.summariser.maybe_summarise_context(snapshot_context, meta)
-                if not res: return
-
-                new_meta, pruned_context = res
-                
-                async with convo.lock:
-                    pruned_ids = {m.get('msg_id') for m in pruned_context if m.get('msg_id')}
-                    new_arrivals = [msg for msg in convo.messages if msg.get('msg_id') not in pruned_ids]
-
-                    if last_snapshot_msg_id and len(new_arrivals) == len(convo.messages):
-                        await Logger.log_async(
-                            f"Snapshot message id {last_snapshot_msg_id} not found during merge for {cid}; using ids fallback.",
-                            "warn"
-                        )
-
-                    final_context = pruned_context + new_arrivals
-                    
-                    convo.summary = new_meta.get('summary', convo.summary)
-                    convo.facts = new_meta.get('facts', convo.facts)
-                    convo.decisions = new_meta.get('key_decisions', convo.decisions)
-                    convo.threads = new_meta.get('open_threads', convo.threads)
-                    convo.messages = convo.attach_meta(final_context)
-                    
-                if not convo.temp:
-                    await self.save(cid)
-                    
-                await Logger.log_async(f"Background summary for {cid} complete.", "success")
-            
-            except Exception as e:
-                await Logger.log_async(f"Background summary failed: {e}", "error")
-
-        async with self.lock:
-            self._summarization_tasks[cid] = asyncio.create_task(background_summarize())
+        if not convo.temp:
+            await self.save(cid)
 
     async def get_context(self, cid):
         if not cid in self.conversations:
@@ -172,23 +146,13 @@ class ContextManager:
             c = self.conversations[cid]
             if not c.temp:
                 p = c.path
+                await c.save()
                 if not os.path.exists(p):
                     await Logger.log_async(f"'{cid}'doesn't exist.", 'warn')
                     return
                 
                 if not c.temp and os.path.exists(c.path):
                     await asyncio.to_thread(os.remove, c.path)
-
-                async with self.lock:
-                    t = self._summarization_tasks.get(cid)
-                    if t:
-                        t.cancel()
-                        try:
-                            await t
-                        except asyncio.CancelledError:
-                            pass
-                        
-                        del self._summarization_tasks[cid]
 
             del self.conversations[cid]
     
@@ -219,15 +183,6 @@ class ContextManager:
     async def shut_down(self): 
         await self.save_all()
         await self.cache_manager.shutdown()
-        for t in self._summarization_tasks.values():
-            t.cancel()
-            try:
-                await t
-            except asyncio.CancelledError:
-                pass
-
-        self._summarization_tasks.clear()
-
         await Logger.log_async("Context saved and context manager shut down.", "info")
 
     async def load(self, cid):
@@ -445,11 +400,8 @@ class Conversation:
                 if meta:
                     msg.update(meta)
 
-            return m
-
         elif new_meta and (isinstance(new_messages, dict) and isinstance(new_meta, dict)):
             new_messages.update(new_meta)
-            return new_messages
 
         else:
             raise TypeError("Metadata datatype doesn't match.")

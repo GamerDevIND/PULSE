@@ -42,7 +42,7 @@ class OpenRouterModel(Model):
            self.resource_manager.create_session()
         
         if not self.resource_manager.session:
-           raise
+           raise RuntimeError(f"No active aiohttp session for {self.name} ({self.model_name})")
 
         async with self.resource_manager.session.get(url, headers=headers) as resp:
             data = await resp.json()
@@ -208,9 +208,11 @@ class OpenRouterModel(Model):
             
         data = await self.get_multimodal_data(data, query, file_path, mod_, video_save_buffer_format)
 
-        if not self.resource_manager.session: self.resource_manager.create_session()
+        if not self.resource_manager.session:
+            self.resource_manager.create_session()
 
-        if not self.resource_manager.session: raise
+        if not self.resource_manager.session:
+            raise RuntimeError(f"No active aiohttp session for {self.name} ({self.model_name})")
         await self.change_state(BUSY)
         if self.event_bus: await self.event_bus.parallel_emit(self.event_bus.INFO, msg = f"Generating response for {self.name}({self.model_name}) [{self.role}]...")
 
@@ -221,8 +223,8 @@ class OpenRouterModel(Model):
             async with self.resource_manager.session.post(self.host, headers=headers, data=json.dumps(data), timeout=timeout) as response:
                 if response.status != 200:
                     error_data = await response.json()
-                    await Logger.log_async(f"Error during generation of {self.name}: {error_data['error']['message']}", 'error')
-                    if self.event_bus: await self.event_bus.sequence_emit(self.event_bus.ERROR, msg = f"Error during generation of {self.name}: {error_data['error']['message']}")
+                    await Logger.log_async(f"Error during generation of {self.name} ({self.model_name}) [{self.role}]: {error_data['error']['message']}", 'error')
+                    if self.event_bus: await self.event_bus.sequence_emit(self.event_bus.ERROR, msg = f"Error during generation of {self.name} ({self.model_name}) [{self.role}]: {error_data['error']['message']}")
                     yield (ERROR_TOKEN, ERROR_TOKEN, [])
                     return
                 
@@ -252,8 +254,8 @@ class OpenRouterModel(Model):
                                     json_line = json.loads(line)
 
                                     if "error" in json_line:
-                                        await Logger.log_async(f"Error during generation of {self.name}: {json_line['error']['message']}", 'error')
-                                        if self.event_bus: await self.event_bus.sequence_emit(self.event_bus.ERROR, msg = f"Error during generation of {self.name}: {json_line['error']['message']}")
+                                        await Logger.log_async(f"Error during generation of {self.name} ({self.model_name}) [{self.role}]: {json_line['error']['message']}", 'error')
+                                        if self.event_bus: await self.event_bus.sequence_emit(self.event_bus.ERROR, msg = f"Error during generation of {self.name} ({self.model_name}) [{self.role}]: {json_line['error']['message']}")
                                         yield (ERROR_TOKEN, ERROR_TOKEN, [])
                                         await self.change_state(IDLE)
                                         return
@@ -356,7 +358,7 @@ class OpenRouterEmbedder(Model):
            self.resource_manager.create_session()
         
         if not self.resource_manager.session:
-           raise
+           raise RuntimeError(f"No active aiohttp session for {self.name} ({self.model_name})")
 
         async with self.resource_manager.session.get(url, headers=headers) as resp:
             data = await resp.json()
@@ -385,8 +387,10 @@ class OpenRouterEmbedder(Model):
 
         await self.change_state(BUSY)
 
-        if not self.resource_manager.session: self.resource_manager.create_session()
-        if not self.resource_manager.session: raise   
+        if not self.resource_manager.session:
+            self.resource_manager.create_session()
+        if not self.resource_manager.session:
+            raise RuntimeError(f"No active aiohttp session for {self.name} ({self.model_name})")
 
         if self.event_bus: await self.event_bus.parallel_emit(self.event_bus.INFO, msg = f"Embedding input(s) with {self.name}({self.model_name})")
 

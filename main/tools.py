@@ -87,10 +87,10 @@ class ToolRegistry:
     def register_global(cls, func, meta):
         with cls._lock:
             if func.__name__ in cls._tools:
-                print(f"Tool {func.__name__} already registered!")
-                print(f"Tools listed: {ToolRegistry._tools.keys()}")
+                Logger.log_sync(f"Tool {func.__name__} already registered!", 'info')
+                Logger.log_sync(f"Tools listed: {ToolRegistry._tools.keys()}", 'info')
                 return
-            print(f"Registering: {func.__name__}")
+            Logger.log_sync(f"Registering: {func.__name__}", 'info')
             cls._tools[func.__name__] = Tool(func, meta)
 
     def __init__(self):
@@ -106,10 +106,10 @@ class ToolRegistry:
     def add_tool_local(self, func, meta):
         with ToolRegistry._lock:
             if func.__name__ in self.tools:
-                print(f"Tool {func.__name__} already registered!")
-                print(f"Tools listed: {ToolRegistry._tools.keys()}")
+                Logger.log_sync(f"Tool {func.__name__} already registered!", 'warn')
+                Logger.log_sync(f"Tools listed: {self._tools.keys()}", 'info')
                 return
-            print(f"Registering: {func.__name__}")
+            Logger.log_sync(f"Adding: {func.__name__}", 'info')
             self.tools[func.__name__] = Tool(func, meta)
 
     def list_tools(self):

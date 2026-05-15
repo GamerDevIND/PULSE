@@ -20,16 +20,17 @@ DOWN = "down"
 WARMING_UP = "warming_up"
 
 class OllamaModel(Model):
-    def __init__(self, role: str, name: str, model_name: str, has_tools: bool, has_CoT: bool, has_vision: bool, port: int, system_prompt: str, 
+    def __init__(self, role: str, name: str, model_name: str, has_tools: bool, has_CoT: bool, has_vision: bool, has_audio, port: int, system_prompt: str, 
                  api_key: None | str = None, event_bus: None | EventBus = None):
         self.port = port
         self.host =  f"http://localhost:{self.port}"
-        super().__init__(role, self.host, name, model_name, api_key, DOWN, event_bus)       
+        super().__init__(role, self.host, name, model_name, api_key, DOWN, event_bus, port = port)       
         self.has_tools = has_tools
         self.has_CoT = has_CoT
         self.has_vision = has_vision
         self.system = system_prompt
         self.generation_cancelled = False
+        self.has_audio = has_audio
 
     def _get_endpoint(self) -> str:
         return "/api/chat"
@@ -47,7 +48,7 @@ class OllamaModel(Model):
            self.resource_manager.create_session()
         
         if not self.resource_manager.session:
-           raise
+           raise RuntimeError(f"No active aiohttp session for {self.name} ({self.model_name})")
     
         async with self.resource_manager.session.post(url, headers=headers, data= json.dumps(data)) as resp:
             res = await resp.json()
@@ -144,7 +145,8 @@ class OllamaModel(Model):
 
         data = await self.get_multimodal_data(data, file_path, mod_, video_save_buffer_format)
 
-        if not self.resource_manager.session: raise
+        if not self.resource_manager.session:
+            raise RuntimeError(f"No active aiohttp session for {self.name} ({self.model_name})")
 
         await self.change_state(BUSY)
 
@@ -305,7 +307,11 @@ class OllamaModel(Model):
 
             data["options"] = options
 
-            if not self.resource_manager.session: raise
+            if not self.resource_manager.session:
+                self.resource_manager.create_session()
+
+            if not self.resource_manager.session:
+                raise RuntimeError(f"No active aiohttp session for {self.name} ({self.model_name})")
 
             await Logger.log_async('Trying Non-Streaming...' ,'info')
             async with self.resource_manager.session.post(url, headers=headers, data=json.dumps(data)) as response: 
@@ -349,9 +355,9 @@ class OllamaModel(Model):
             await Logger.log_async(f"{self.name} ({self.model_name}) warmed up!", "success")
             if self.event_bus: await self.event_bus.parallel_emit(self.event_bus.INFO, msg = f"{self.name} ({self.model_name}) warmed up!")
 
-        except Exception:
+        except Exception as e:
             self.warmed_up = False
-            raise
+            raise RuntimeError(f"Failed to warm up {self.name} ({self.model_name}): {e}") from e
 
         finally: 
             await self.change_state(IDLE if self.warmed_up else DOWN)
@@ -365,7 +371,7 @@ class OllamaEmbedder(Model):
     def __init__(self, role, name: str, model_name: str, port:int, api_key = None, event_bus: None | EventBus = None) -> None:
         self.port = port
         self.host =  f"http://localhost:{self.port}"
-        super().__init__(role, self.host, name, model_name, api_key, DOWN, event_bus)
+        super().__init__(role, self.host, name, model_name, api_key, DOWN, event_bus, port = port)
         self.generation_cancelled = False
                 
     def cancel_global(self):
@@ -391,8 +397,8 @@ class OllamaEmbedder(Model):
            self.resource_manager.create_session()
         
         if not self.resource_manager.session:
-           raise
-    
+           raise RuntimeError(f"No active aiohttp session for {self.name} ({self.model_name})")
+
         async with self.resource_manager.session.post(url, headers=headers, data= json.dumps(data)) as resp:
             res = await resp.json()
 
@@ -417,7 +423,8 @@ class OllamaEmbedder(Model):
 
         await self.change_state(BUSY)
 
-        if not self.resource_manager.session: raise
+        if not self.resource_manager.session:
+            raise RuntimeError(f"No active aiohttp session for {self.name} ({self.model_name})")
 
         if self.event_bus: await self.event_bus.parallel_emit(self.event_bus.INFO, msg = f"Embedding input(s) with {self.name}({self.model_name})")
 
@@ -482,7 +489,11 @@ class OllamaEmbedder(Model):
             endpoint = self._get_endpoint()
             url = f"{self.host}{endpoint}"
 
-            if not self.resource_manager.session: raise
+            if not self.resource_manager.session:
+                self.resource_manager.create_session()
+
+            if not self.resource_manager.session:
+                raise RuntimeError(f"No active aiohttp session for {self.name} ({self.model_name})")
 
             timeout = aiohttp.ClientTimeout(total=120)
             async with self.resource_manager.session.post(url, headers=headers, data=json.dumps(data), timeout=timeout) as response:

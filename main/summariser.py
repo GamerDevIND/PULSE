@@ -9,16 +9,15 @@ import re
 import json
 from .events import EventBus
 
-# TODO: Key decisions, open threads
-
 TURNS_TO_MSG_MULTIPLIER = 2.5
 
 class Summariser:
-    def __init__(self, model:RemoteModel | LocalModel | OpenRouterModel | None,  summary_max_tokens, summary_keep_tokens_after, min_recent_turns, event_bus : None | EventBus = None) -> None:
+    def __init__(self, model:RemoteModel | LocalModel | OpenRouterModel | None,  summary_max_tokens, summary_keep_tokens_after, min_recent_turns, trim_turn_num, event_bus : None | EventBus = None) -> None:
         self.summary_max_tokens = summary_max_tokens
         self.summary_keep_tokens_after = summary_keep_tokens_after
-        self.min_recent_msgs = int(round(min_recent_turns * TURNS_TO_MSG_MULTIPLIER))
+        self.min_recent_msgs = round(min_recent_turns * TURNS_TO_MSG_MULTIPLIER)
         self.model = model
+        self.trim_turn_num = round(trim_turn_num * TURNS_TO_MSG_MULTIPLIER)
         self.format = {
             "type": "object",
             "properties": {
@@ -50,6 +49,36 @@ class Summariser:
         
         self.event_bus = event_bus
 
+    def build_convo_text(self, text, convo:list[dict], chunk_budget):
+        text = text
+
+        used = 0
+        for t in convo:
+
+            role = t['role']
+            content = t['content']
+
+            message_tokens = estimate_tokens(f"<{role}> {content} </{role}>\n".strip())
+
+            if used + message_tokens > chunk_budget:
+                break 
+
+            if role != 'tool':
+                text += f"<{role}> {content} </{role}>\n"
+            elif role == 'tool':
+                try:
+                    tc = json.dumps(content)
+                except json.JSONDecodeError:
+                    tc = ""
+                    
+                if tc:
+                    name = t['tool_name']
+                    text += f"<{role} (Name: {name})> {content} </{role}>\n"
+
+            used += message_tokens
+
+        return text
+
     async def maybe_summarise_context(self, context, prev_meta = {}, summary_system_prompt = SUMMARIZER_PROMPT, auto_warm_up = False):
         if auto_warm_up and self.model and self.model.state == DOWN: 
             await self.model.warm_up()
@@ -79,7 +108,9 @@ class Summariser:
         if prev_open_threads: contents.extend(prev_open_threads)
         if prev_key_decisions: contents.extend(prev_key_decisions)
 
-        if estimate_tokens(" ".join(contents)) >= self.summary_max_tokens:  
+        est = estimate_tokens(" ".join(contents))
+
+        if est >= self.summary_max_tokens:  
             text = '\n'
             chunk_budget = self.summary_max_tokens - self.summary_keep_tokens_after
             keep_idx = len(context) - self.min_recent_msgs
@@ -109,36 +140,37 @@ class Summariser:
 
                 return meta, context
 
-            used = 0
-            for t in summarize_part:
-
-                role = t['role']
-                content = t['content']
-
-                message_tokens = estimate_tokens(f"<{role}> {content} </{role}>\n".strip())
-
-                if used + message_tokens > chunk_budget:
-                    break 
-
-                if role != 'tool':
-                    text += f"<{role}> {content} </{role}>\n"
-                elif role == 'tool':
-                    try:
-                        tc = json.dumps(content)
-                    except json.JSONDecodeError:
-                        tc = ""
-                    
-                    if tc:
-                        name = t['tool_name']
-                        text += f"<{role} (Name: {name})> {content} </{role}>\n"
-
-                used += message_tokens
+            text = self.build_convo_text(text, summarize_part, chunk_budget)
 
             if self.event_bus:
                 await self.event_bus.sequence_emit(self.event_bus.SUMMARISING)
                 
             await Logger.log_async("Summarising started", 'info')
-            
+
+            est = round(estimate_tokens(text))
+
+            await Logger.log_async(f"Estimated tokens of the convo: {est}",'info')
+
+            if est >= self.summary_max_tokens * 3:
+                await Logger.log_async(f"Conversation too big, trimming the oldest {self.trim_turn_num} messages", 'warn')
+                if self.event_bus: await self.event_bus.parallel_emit(self.event_bus.WARN, msg = f"Conversation too big, trimming the oldest {self.trim_turn_num} messages")
+
+                summarize_part = summarize_part[self.trim_turn_num:]
+
+                if not summarize_part:
+                    meta = {
+                    'facts': prev_facts,
+                    'summary': prev_summary,
+                    'open_threads': prev_open_threads,
+                    'key_decisions': prev_key_decisions
+                    }
+
+                    return meta, context
+
+                text = self.build_convo_text(text, summarize_part, chunk_budget)
+
+                to_keep = to_keep[self.trim_turn_num:]
+
             text = f"""(user/assistant messages below are the ONLY new information)\nOutput ONLY the updated summary and facts text / array. No commentary.
             <NEW_CONVERSATION>
                 {text}
@@ -169,10 +201,11 @@ class Summariser:
                 text = f"Below are the previous key decisions extracted from the previous conversation turns. Change the key decisions only when explicitly contradicted or explicitly stated to forget. Do NOT invent key decisions or context. treat the given conversation aa ground truth.\n Never invent or assume context unless provided in the previous lossy summary or the provided conversation. You're allowed to merge decisions only when they explicitly overlap\n<DECISIONS>\n{"\n".join(prev_key_decisions)}\n<DECISIONS>".strip() + text
 
 
-            text += "\n\nPrefer recent evidence (conversation) over prior system generated summary / facts / open threads / key decisions."
+            text += ("\n\nPrefer recent evidence (conversation) over prior system generated summary / facts / open threads / key decisions. \n"
+            "If nothing changes, preserve it verbatim, don't say 'Orginal summary / facts / open threads / key decisions unchanged.' produce it as is (1:1) verbatim.")
 
             entry = None  
-            try:  
+            try:
                 async for (_, out, _ )in self.model.generate(text, [], stream=False, system_prompt_override=system, format_=self.format):  
                     if out != ERROR_TOKEN and (out and isinstance(out, str) and out.strip()):
                         entry = out
@@ -187,15 +220,46 @@ class Summariser:
             key_decisions = prev_key_decisions or []
             open_threads = prev_open_threads or []
             if entry:
-                entry = re.sub(r"```json\n?|```", "", entry)
-                try:
-                    entry = json.loads(entry)
-                    if isinstance(entry, dict):
-                        entry = entry
-                except json.JSONDecodeError:
+                entry = re.sub(r"```json\n?|```", "", entry).strip().replace("\n\n\n\n", "\n")
+                entry_obj = None
+
+                def extract_json_payload(raw_text):
+                    start = raw_text.find('{')
+                    if start == -1:
+                        return None
+                    stack = []
+                    for idx, ch in enumerate(raw_text[start:], start):
+                        if ch == '{':
+                            stack.append('{')
+                        elif ch == '}':
+                            if stack:
+                                stack.pop()
+                                if not stack:
+                                    return raw_text[start:idx + 1]
+                    return None
+
+                def safe_json_load(raw_text):
+                    try:
+                        return json.loads(raw_text)
+                    except json.JSONDecodeError:
+                        payload = extract_json_payload(raw_text)
+                        if not payload:
+                            return None
+                        try:
+                            return json.loads(payload)
+                        except json.JSONDecodeError:
+                            normalized = re.sub(r",\s*([\]}])", r"\1", payload)
+                            try:
+                                return json.loads(normalized)
+                            except json.JSONDecodeError:
+                                return None
+
+                entry_obj = safe_json_load(entry)
+                if not isinstance(entry_obj, dict):
                     await Logger.log_async("Summariser json failed", "warn")
                     await Logger.log_async(f"Raw output: {entry}", "warn")
-                    if self.event_bus: await self.event_bus.sequence_emit(self.event_bus.SUMMARISING_FAILED, error= "Summariser json failed")
+                    if self.event_bus:
+                        await self.event_bus.sequence_emit(self.event_bus.SUMMARISING_FAILED, error="Summariser json failed")
                     meta = {
                         'facts': prev_facts,
                         'summary': prev_summary,
@@ -203,43 +267,44 @@ class Summariser:
                         'key_decisions': prev_key_decisions
                     }
 
+                    t = " ".join(list(map(lambda x: x.get('content', ''), context)))
+
+                    if estimate_tokens(t) >= self.summary_max_tokens * 3:
+                        context = context[self.trim_turn_num:]
                     return meta, context
-                        
-                summary = str(entry["summary"])
+
+                summary = str(entry_obj.get("summary", prev_summary or ""))
                 summary_words_len = len(summary.split())
-                if summary_words_len < 20:
-                    await Logger.log_async("Summary too short", "warn")
-                    if self.event_bus: await self.event_bus.sequence_emit(self.event_bus.SUMMARISING_FAILED, error= "Summary too short")
+                if summary_words_len < 15:
+                    await Logger.log_async(f"Summary too short: {summary}", "warn")
+                    if self.event_bus:
+                        await self.event_bus.sequence_emit(self.event_bus.SUMMARISING_FAILED, msg=f"Summary too short: {summary}")
                     meta = {
                         'facts': prev_facts,
                         'summary': prev_summary,
                         'open_threads': prev_open_threads,
                         'key_decisions': prev_key_decisions
+
                     }
+
+                    if estimate_tokens(" ".join([m.get('content', '') for m in context])) >= self.summary_max_tokens * 3:
+                        context = context[self.trim_turn_num:]
 
                     return meta, context
 
-                facts = entry["facts"]
+                facts = entry_obj.get("facts", []) or []
                 facts = list(set(facts))
-                if len(facts) < 3:
-                    await Logger.log_async("Facts array too short", "warn")
-                    if self.event_bus: await self.event_bus.sequence_emit(self.event_bus.SUMMARISING_FAILED, error= "Facts array too short")
-
-                key_decisions = entry['key_decisions']
-                key_decisions = list(set(key_decisions))
-                
-                open_threads = entry['open_threads']
-                open_threads = list(set(open_threads))
+                key_decisions = list(set(entry_obj.get('key_decisions', []) or []))
+                open_threads = list(set(entry_obj.get('open_threads', []) or []))
 
                 context = to_keep
 
-            # TODO: Trim the context to remove older entries if needed explicitly  
-            await Logger.log_async("Summarised successfully", 'success')
+            await Logger.log_async("Summarisation successfully ran", 'success')
             if self.event_bus:
                 await self.event_bus.sequence_emit(self.event_bus.SUMMARISED,)
             
             meta = {
-                'facts': facts if facts and len(facts) > 2 else ((prev_facts) + (facts or []) if prev_facts else []),
+                'facts': facts if facts and len(facts) >= 3 else ((prev_facts) + (facts or []) if prev_facts else []),
                 'summary': summary,
                 'open_threads': open_threads,
                 'key_decisions': key_decisions

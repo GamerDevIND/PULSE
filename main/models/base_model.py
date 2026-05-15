@@ -29,7 +29,7 @@ class Model:
         self.state = init_state
         self.api_key = api_key
         self.has_vision = kwargs.get('has_vision', False)
-        self.port:int | None = None
+        self.port:int | None = kwargs.get("port")
         self.input_handler = InputHandler()
         self.event_bus = event_bus
         self.details_cache = None

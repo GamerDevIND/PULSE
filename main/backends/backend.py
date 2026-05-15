@@ -189,8 +189,10 @@ class Backend:
         return session.id, session
 
     async def close_sessions(self):
-        for s in list(self.sessions.values()):
+        sessions = list(self.sessions.values())
+        for s in sessions:
             await s.cancel()
+        self.sessions.clear()
         
         for task in list(self.running_tasks):
             task.cancel()
@@ -198,6 +200,7 @@ class Backend:
                 await task
             except asyncio.CancelledError:
                 pass
+        self.running_tasks.clear()
 
     def get_models_state(self):
         states = [{"name": m.name, 'model_name': m.model_name, 'state': m.state, 'role': m.role,} for m in self.models.values()]
