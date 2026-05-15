@@ -337,7 +337,7 @@ class ToastSystem {
         this.queue = [];
         this.isProcessing = false;
         this.MAX_VISIBLE_TOASTS = 3;
-        this.SPAM_THRESHOLD = 400; // in ms
+        this.SPAM_THRESHOLD = 700; // in ms
 
         this.eventMap = {
             "error": "error",

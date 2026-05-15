@@ -8,13 +8,14 @@ import asyncio
 from quart import Quart, render_template, jsonify, request, Response, stream_with_context
 import datetime
 import random
+import traceback
 
 from main.AI import AI
 from main.utils import Logger, estimate_tokens
 from main.configs import USERNAME, DEFAULT_PROMPT, CHAOS_PROMPT, RAG_MIN_SCORE
 
 app = Quart(__name__)
-ai = AI("main/Models_configs.json", mode='openrouter', use_RAG=False)
+ai = AI("main/Models_config.json", mode='multi', use_RAG=False)
 notification_queue = asyncio.Queue()
 models_status_cooldown_secs = 0.8
 SSE_timeout = 30
@@ -37,7 +38,7 @@ def get_greeting():
     greetings.append(formal())
     greetings.append("Good to see you")
     greetings.append("Welcome")
-    greetings = list(map(lambda x : x + f", {USERNAME}.", greetings))
+    if USERNAME and USERNAME.strip(): greetings = list(map(lambda x : x + f", {USERNAME}.", greetings))
     greetings.append("What's on your mind today?")
     greetings.append("What are we doing today?")
     greetings.append("Where should we start?")
@@ -45,11 +46,13 @@ def get_greeting():
     return greeting
 
 shutdown_event = asyncio.Event()
+startup_task = None
 
 async def shutdown():
-    if not shutdown_event.is_set():
-        shutdown_event.set()
-        await ai.shut_down()
+        try:
+            await ai.shut_down()
+        except Exception as e:
+            await Logger.log_async(f"Error during shutdown: {e}; {traceback.format_exc()}", 'error')
 
 @app.after_serving
 async def shutdown_app():
@@ -57,12 +60,12 @@ async def shutdown_app():
 
 @app.before_serving
 async def startup():
-    asyncio.create_task(ai.init("web"))
+    startup_task = asyncio.create_task(ai.init("web"))
 
 @app.route('/')
 async def index():
     current_greeting = get_greeting()
-    return await render_template("new.html", greeting = current_greeting, name = USERNAME, 
+    return await render_template("chat.html", greeting = current_greeting, name = USERNAME, 
                                  chats = await ai.context_manager.list_conversations(),
                                  estimated_tokens = 0,
                                  mode = ai.mode,
@@ -91,7 +94,7 @@ async def chat_view(cid):
             "mode": ai.mode,
             "models_status": ai.backend.get_models_state() if ai.backend else []
         }
-        return await render_template("new.html", **c)
+        return await render_template("chat.html", **c)
     except KeyError:
         return "Chat not found", 404
     
@@ -200,7 +203,7 @@ async def all_events(**kwargs):
         ai.event_bus.INITIALISED: "success"
     }
 
-    if not event_name:
+    if (not event_name) or event_name == ai.event_bus.GENERATION_CHUNK:
         return
 
     message = msg if msg is not None else event_name.replace("_", " ").capitalize().strip()
@@ -252,4 +255,4 @@ async def temp_chat_endpoint():
     return Response(stream_with_context(generate)(), mimetype='application/x-ndjson')
 
 if __name__ == "__main__":
-    app.run(debug=True,)
+    app.run(debug=True, use_reloader=False)
