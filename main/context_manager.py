@@ -1,5 +1,5 @@
-from .utils import Logger
-from .configs import FILE_NAME_KEY
+from .utils import Logger, estimate_tokens
+from .configs import FILE_NAME_KEY, TRIM_TURN_NUM
 import json 
 import asyncio
 import uuid
@@ -24,7 +24,7 @@ class ContextManager:
 
         self.lock = asyncio.Lock()
 
-        self.summariser = Summariser(summary_model,  summary_max_tokens, keep_tokens_after_summary, min_recent_turns, event_bus)
+        self.summariser = Summariser(summary_model,  summary_max_tokens, keep_tokens_after_summary, min_recent_turns, TRIM_TURN_NUM, event_bus)
 
         self.cache_manager = CacheManager(gc_time_limit, gc_limit_size_MBs, gc_interval, cache_folder, event_bus)
 
@@ -64,6 +64,10 @@ class ContextManager:
         r = await self.summariser.maybe_summarise_context(convo.messages, meta)
         if r:
             meta, c = r
+
+            if estimate_tokens(" ".join([m.get('content', '') for m in c])) >= self.summariser.summary_max_tokens * 3:
+                c = c[TRIM_TURN_NUM:]
+
             async with convo.lock:
                 s = meta['summary']
                 f = meta['facts']
