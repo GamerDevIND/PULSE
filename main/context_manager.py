@@ -388,23 +388,20 @@ class Conversation:
     def attach_msg_extra_meta(self, new_messages:list[dict] | dict, new_meta: list[dict | None] | dict | None = None):
         m = self.attach_meta(new_messages)
         
-        if isinstance(new_messages, (list, tuple)) and isinstance(new_meta, (list, tuple)):
-            m = list(m)
-            new_meta = list(new_meta)
-            if len(new_messages) > len(new_meta):
-                new_meta.extend(None for _ in range(len(new_messages) - len(new_meta)))
-            if len(new_meta) > len(new_messages):
-                raise ValueError("Metadata len too big")
-
+        if isinstance(m, list) and isinstance(new_meta, list):
+            if len(m) > len(new_meta):
+                new_meta.extend(None for _ in range(len(m) - len(new_meta)))
+            
             for msg, meta in zip(m, new_meta):
                 if meta:
                     msg.update(meta)
+            return m
 
-        elif new_meta and (isinstance(new_messages, dict) and isinstance(new_meta, dict)):
-            new_messages.update(new_meta)
+        elif new_meta and isinstance(m, dict) and isinstance(new_meta, dict):
+            m.update(new_meta)
+            return m
 
-        else:
-            raise TypeError("Metadata datatype doesn't match.")
+        return m
 
     async def rename(self, name):
         async with self.lock: 
