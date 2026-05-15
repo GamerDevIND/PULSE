@@ -12,7 +12,7 @@ from .events import EventBus
 TURNS_TO_MSG_MULTIPLIER = 2.5
 
 class Summariser:
-    def __init__(self, model:RemoteModel | LocalModel | OpenRouterModel | None,  summary_max_tokens, summary_keep_tokens_after, min_recent_turns, trim_turn_num, event_bus : None | EventBus = None) -> None:
+    def __init__(self, model:RemoteModel | LocalModel | OpenRouterModel | None,  summary_max_tokens, summary_keep_tokens_after, min_recent_turns, trim_turn_num = 3, event_bus : None | EventBus = None) -> None:
         self.summary_max_tokens = summary_max_tokens
         self.summary_keep_tokens_after = summary_keep_tokens_after
         self.min_recent_msgs = round(min_recent_turns * TURNS_TO_MSG_MULTIPLIER)
