@@ -210,7 +210,7 @@ A new mode has also been added. OpenRouter models can be used by setting the `mo
 
 - Vision (Image added. Video added. Audio is partially implemented, expect inconsistencies and bugs. Please stand by.)
 
-- Agentic mode (because why the hell not / WIP *expected* full drop: v1.5.x)
+- Agentic mode (because why the hell not / WIP *expected* full drop: v1.7.x)
 
 - Perception (hoping to be added on v2.x, I have no idea how I'll pull that off but eh let's see.)
 
